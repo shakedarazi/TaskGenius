@@ -1,0 +1,21 @@
+{
+    "name": "taskgenius",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Task management platform with AI-powered insights",
+    "scripts": {
+        "dev": "concurrently \"npm run dev:backend\" \"npm run dev:client\"",
+        "dev:backend": "cd services/core-api && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+        "dev:client": "cd packages/client && npm run dev",
+        "install:client": "cd packages/client && npm install",
+        "build:client": "cd packages/client && npm run build",
+        "test:backend": "cd services/core-api && pytest tests/ -v",
+        "test:client": "cd packages/client && npm run test",
+        "docker:up": "docker compose up -d",
+        "docker:down": "docker compose down",
+        "docker:logs": "docker compose logs -f"
+    },
+    "devDependencies": {
+        "concurrently": "^8.2.0"
+    }
+}

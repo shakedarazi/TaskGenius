@@ -1,0 +1,101 @@
+# TASKGENIUS Docker Compose Configuration
+# 
+# Architecture:
+# - core-api: Public backend (port 8000 exposed)
+# - chatbot-service: Internal service (no port exposed to host)
+# - mongodb: Internal database (no port exposed to host)
+
+services:
+  # =============================================================
+  # Core API - Primary backend and system of record
+  # This is the ONLY public-facing service
+  # =============================================================
+  core-api:
+    build:
+      context: ./services/core-api
+      dockerfile: Dockerfile
+    container_name: taskgenius-core-api
+    ports:
+      - "8000:8000"  # Only public port
+    environment:
+      - DEBUG=false
+      - MONGODB_URI=mongodb://mongodb:27017
+      - MONGODB_DATABASE=taskgenius
+      - CHATBOT_SERVICE_URL=http://chatbot-service:8001
+      - LOG_LEVEL=INFO
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      chatbot-service:
+        condition: service_healthy
+    networks:
+      - taskgenius-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # =============================================================
+  # Chatbot Service - Internal conversational layer
+  # Accessible ONLY from core-api via internal network
+  # Must NEVER access MongoDB directly
+  # =============================================================
+  chatbot-service:
+    build:
+      context: ./services/chatbot-service
+      dockerfile: Dockerfile
+    container_name: taskgenius-chatbot-service
+    # NO PORTS EXPOSED TO HOST - internal only
+    environment:
+      - DEBUG=false
+      - CORE_API_URL=http://core-api:8000
+      - LOG_LEVEL=INFO
+    networks:
+      - taskgenius-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # =============================================================
+  # MongoDB - Data persistence
+  # Accessible ONLY from core-api
+  # =============================================================
+  mongodb:
+    image: mongo:7.0
+    container_name: taskgenius-mongodb
+    # NO PORTS EXPOSED TO HOST - internal only
+    environment:
+      - MONGO_INITDB_DATABASE=taskgenius
+    volumes:
+      - mongodb_data:/data/db
+    networks:
+      - taskgenius-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+# =============================================================
+# Networks
+# =============================================================
+networks:
+  taskgenius-network:
+    driver: bridge
+    name: taskgenius-network
+
+# =============================================================
+# Volumes
+# =============================================================
+volumes:
+  mongodb_data:
+    name: taskgenius-mongodb-data

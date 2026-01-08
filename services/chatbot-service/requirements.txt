@@ -1,0 +1,14 @@
+# TASKGENIUS Chatbot Service Dependencies
+# Phase 0-2: Minimal dependencies for health endpoint
+
+fastapi>=0.109.0,<1.0.0
+uvicorn[standard]>=0.27.0,<1.0.0
+pydantic>=2.5.0,<3.0.0
+python-dotenv>=1.0.0,<2.0.0
+
+# HTTP Client for core-api communication (placeholder)
+# httpx>=0.26.0,<1.0.0
+
+# AI/LLM (placeholder for future phases)
+# openai>=1.10.0,<2.0.0
+# langchain>=0.1.0,<1.0.0

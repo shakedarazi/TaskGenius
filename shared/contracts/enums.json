@@ -1,0 +1,54 @@
+{
+  "TaskStatus": {
+    "OPEN": "open",
+    "IN_PROGRESS": "in_progress",
+    "DONE": "done",
+    "CANCELED": "canceled"
+  },
+  "TaskPriority": {
+    "LOW": "low",
+    "MEDIUM": "medium",
+    "HIGH": "high",
+    "URGENT": "urgent"
+  },
+  "TaskCategory": {
+    "WORK": "work",
+    "STUDY": "study",
+    "PERSONAL": "personal",
+    "HEALTH": "health",
+    "FINANCE": "finance",
+    "ERRANDS": "errands",
+    "OTHER": "other"
+  },
+  "EstimateBucket": {
+    "LT_15": "lt_15",
+    "15_30": "15_30",
+    "30_60": "30_60",
+    "60_120": "60_120",
+    "GT_120": "gt_120"
+  },
+  "UrgencyLevel": {
+    "NO_DEADLINE": "no_deadline",
+    "OVERDUE": "overdue",
+    "DUE_TODAY": "due_today",
+    "DUE_SOON": "due_soon",
+    "NOT_SOON": "not_soon"
+  },
+  "ChatIntent": {
+    "CREATE_TASK": "create_task",
+    "LIST_TASKS": "list_tasks",
+    "UPDATE_TASK": "update_task",
+    "COMPLETE_TASK": "complete_task",
+    "DELETE_TASK": "delete_task",
+    "QUERY_STATUS": "query_status",
+    "GET_INSIGHTS": "get_insights",
+    "UNKNOWN": "unknown"
+  },
+  "ErrorCode": {
+    "VALIDATION_ERROR": "validation_error",
+    "NOT_FOUND": "not_found",
+    "UNAUTHORIZED": "unauthorized",
+    "INTERNAL_ERROR": "internal_error",
+    "SERVICE_UNAVAILABLE": "service_unavailable"
+  }
+}
