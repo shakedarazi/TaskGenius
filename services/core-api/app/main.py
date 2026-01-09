@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.auth import auth_router
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -54,6 +55,9 @@ async def root() -> dict:
         "docs": "/docs" if settings.DEBUG else "disabled",
     }
 
+
+# Phase 1: Authentication router
+app.include_router(auth_router)
 
 # Placeholder for future routers
 # from app.routers import tasks, chat, insights
