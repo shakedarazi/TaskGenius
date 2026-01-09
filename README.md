@@ -134,4 +134,36 @@ npm run test             # Run Vitest
 
 ## License
 
+
+## run it 
+
+Step-by-Step Instructions
+1. Install Root Dependencies
+cd c:\Users\shaked arazi\Desktop\Projects\TaskGenius
+npm install
+
+2. Install Client Dependencies
+cd packages/client
+npm install
+
+3. Set Up Python Virtual Environment (for Backend)
+cd services/core-api
+python -m venv venv
+Activate it:
+
+Platform	Command
+Windows (PowerShell)	.\venv\Scripts\Activate.ps1
+Windows (CMD)	venv\Scripts\activate.bat
+
+4. Install Python Dependencies (core-api directory)
+
+pip install -r requirements.txt
+
+5. Run the Application
+Option A: Run Everything Together (from root)
+npm run dev
+This starts:
+
+Backend (FastAPI) on http://localhost:8000
+Frontend (Vite/React) on http://localhost:5173
 MIT

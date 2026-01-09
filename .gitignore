@@ -25,6 +25,19 @@ htmlcov/
 .tox/
 .nox/
 
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+lerna-debug.log*
+
+# Build artifacts (client)
+dist/
+dist-ssr/
+*.tsbuildinfo
+
 # Virtual environments
 .env
 .venv
