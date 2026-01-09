@@ -16,6 +16,7 @@ from app.auth import auth_router
 from app.tasks import tasks_router
 from app.insights import insights_router
 from app.chat import chat_router
+from app.telegram import telegram_router
 
 
 @asynccontextmanager
@@ -85,3 +86,6 @@ app.include_router(insights_router)
 
 # Phase 4: Chat router
 app.include_router(chat_router)
+
+# Phase 5: Telegram router
+app.include_router(telegram_router)

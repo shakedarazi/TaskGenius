@@ -22,6 +22,7 @@ services:
       - MONGODB_URI=mongodb://mongodb:27017
       - MONGODB_DATABASE=taskgenius
       - CHATBOT_SERVICE_URL=http://chatbot-service:8001
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - LOG_LEVEL=INFO
     depends_on:
       mongodb:

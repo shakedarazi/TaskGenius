@@ -29,6 +29,9 @@ class Settings:
         "CHATBOT_SERVICE_URL", "http://chatbot-service:8001"
     )
 
+    # Telegram Bot
+    TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN", None)
+
     # CORS - Allowed origins for client requests
     # In production, set to specific origins like "https://taskgenius.example.com"
     # Multiple origins can be comma-separated
