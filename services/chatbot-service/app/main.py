@@ -46,6 +46,6 @@ async def root() -> dict:
     }
 
 
-# Placeholder for future routers
-# from app.routers import interpret
-# app.include_router(interpret.router, prefix="/interpret", tags=["Interpret"])
+# Phase 4: Interpret router
+from app.router import router as interpret_router
+app.include_router(interpret_router)

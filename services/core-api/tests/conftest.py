@@ -9,10 +9,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Callable
 from fastapi.testclient import TestClient
 
+from unittest.mock import MagicMock
+
 from app.main import app
 from app.auth.repository import user_repository
 from app.tasks.repository import InMemoryTaskRepository
 from app.tasks.router import get_task_repository
+from app.database import get_database
 
 
 # Global in-memory repository for tests
@@ -22,6 +25,13 @@ _test_repository = InMemoryTaskRepository()
 async def override_get_task_repository():
     """Override dependency to use in-memory repository."""
     return _test_repository
+
+
+async def override_get_database():
+    """Override database dependency (not used in tests, but required by some dependencies)."""
+    # Return a mock database - ChatService doesn't actually use it
+    # It only uses it to create InsightsService which doesn't need it
+    return MagicMock()
 
 
 @pytest.fixture
@@ -37,6 +47,8 @@ def client(task_repository):
     user_repository.clear()
     # Override the repository dependency
     app.dependency_overrides[get_task_repository] = override_get_task_repository
+    # Override database dependency (required by chat service)
+    app.dependency_overrides[get_database] = override_get_database
     yield TestClient(app)
     # Clean up override after test
     app.dependency_overrides.clear()

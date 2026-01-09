@@ -15,6 +15,7 @@ from app.database import database
 from app.auth import auth_router
 from app.tasks import tasks_router
 from app.insights import insights_router
+from app.chat import chat_router
 
 
 @asynccontextmanager
@@ -81,3 +82,6 @@ app.include_router(tasks_router)
 
 # Phase 3: Insights router
 app.include_router(insights_router)
+
+# Phase 4: Chat router
+app.include_router(chat_router)
