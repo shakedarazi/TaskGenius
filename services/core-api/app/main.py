@@ -5,11 +5,26 @@ This is the primary backend service and system of record for TASKGENIUS.
 It is the ONLY public-facing backend entrypoint.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.database import database
 from app.auth import auth_router
+from app.tasks import tasks_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Application lifespan handler for startup/shutdown events."""
+    # Startup: Connect to MongoDB
+    await database.connect()
+    yield
+    # Shutdown: Disconnect from MongoDB
+    await database.disconnect()
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -17,6 +32,7 @@ app = FastAPI(
     description="Task management platform with AI-powered insights",
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
+    lifespan=lifespan,
 )
 
 # CORS configuration - allow client origins
@@ -59,8 +75,5 @@ async def root() -> dict:
 # Phase 1: Authentication router
 app.include_router(auth_router)
 
-# Placeholder for future routers
-# from app.routers import tasks, chat, insights
-# app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["Tasks"])
-# app.include_router(chat.router, prefix="/api/v1/chat", tags=["Chat"])
-# app.include_router(insights.router, prefix="/api/v1/insights", tags=["Insights"])
+# Phase 2: Tasks router
+app.include_router(tasks_router)
