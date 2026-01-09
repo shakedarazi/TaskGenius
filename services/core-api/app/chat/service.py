@@ -77,9 +77,11 @@ class ChatService:
         if any(word in message_lower for word in ["summary", "insights", "report", "weekly"]):
             # Generate weekly summary
             from datetime import datetime, timezone
+            import json
             now = datetime.now(timezone.utc)
             summary = self.insights_service.generate_weekly_summary(tasks, now)
-            weekly_summary_data = summary.model_dump()
+            # Convert to JSON string and back to dict to ensure datetime serialization
+            weekly_summary_data = json.loads(summary.model_dump_json())
         
         # Build request for chatbot-service
         chatbot_request = {
