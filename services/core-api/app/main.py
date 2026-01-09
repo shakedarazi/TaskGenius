@@ -17,11 +17,14 @@ from app.tasks import tasks_router
 from app.insights import insights_router
 from app.chat import chat_router
 from app.telegram import telegram_router
+from app.security import validate_security_config
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown events."""
+    # Startup: Validate security configuration
+    validate_security_config()
     # Startup: Connect to MongoDB
     await database.connect()
     yield

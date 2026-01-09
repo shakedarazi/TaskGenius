@@ -35,10 +35,12 @@ class Settings:
     # CORS - Allowed origins for client requests
     # In production, set to specific origins like "https://taskgenius.example.com"
     # Multiple origins can be comma-separated
+    # NEVER use wildcard (*) in production
+    _cors_origins_env = os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000")
     CORS_ORIGINS: list[str] = [
         origin.strip()
-        for origin in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
-        if origin.strip()
+        for origin in _cors_origins_env.split(",")
+        if origin.strip() and origin.strip() != "*"  # Reject wildcard
     ]
 
     # Logging
@@ -48,6 +50,11 @@ class Settings:
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
     JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production mode."""
+        return not self.DEBUG and self.JWT_SECRET_KEY != "dev-secret-key-change-in-production"
 
 
 settings = Settings()
