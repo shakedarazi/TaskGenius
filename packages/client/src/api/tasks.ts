@@ -1,78 +1,128 @@
 /**
  * Tasks API Module
- * 
+ *
  * Handles task CRUD operations.
  * All mutations go through core-api which writes to MongoDB.
- * 
+ *
  * IMPORTANT: core-api is the ONLY executor of task mutations.
  */
 
 import { apiClient } from './client';
 import type {
-    Task,
-    CreateTaskRequest,
-    UpdateTaskRequest,
-    TaskListResponse,
-    TaskFilters
+  Task,
+  CreateTaskRequest,
+  UpdateTaskRequest,
+  TaskListResponse,
+  TaskFilters,
 } from '@/types';
+
+function normalizeTask(raw: any): Task {
+  return {
+    id: raw.id ?? raw._id,
+    owner_id: raw.user_id ?? raw.owner_id,
+    title: raw.title,
+    description: raw.description ?? undefined,
+    status: raw.status, // 'open' | 'in_progress' | 'done' | 'canceled'
+    priority: raw.priority,
+    tags: raw.tags ?? undefined,
+
+    // backend uses "deadline"
+    deadline: raw.deadline ?? undefined,
+
+    completed_at: raw.completed_at ?? raw.completed_at ?? undefined,
+    created_at: raw.created_at ?? raw.created_at,
+    updated_at: raw.updated_at ?? raw.updated_at,
+  };
+}
+
+function normalizeTaskListResponse(raw: any): TaskListResponse {
+  return {
+    tasks: (raw.tasks ?? []).map(normalizeTask),
+    total: raw.total ?? 0,
+    page: raw.page ?? 1,
+    limit: raw.limit ?? (raw.tasks?.length ?? 0),
+    hasMore: raw.hasMore ?? false,
+  };
+}
+
+function buildListEndpoint(filters?: TaskFilters): string {
+  const params = new URLSearchParams();
+
+  if (filters?.status) params.set('status', filters.status);
+  if (filters?.priority) params.set('priority', filters.priority);
+  if (filters?.search) params.set('search', filters.search);
+  if (filters?.page) params.set('page', String(filters.page));
+  if (filters?.limit) params.set('limit', String(filters.limit));
+
+  const query = params.toString();
+  return query ? `/tasks?${query}` : '/tasks';
+}
 
 /**
  * Fetch all tasks for the current user
- * Supports optional filtering and pagination
  */
 export async function listTasks(filters?: TaskFilters): Promise<TaskListResponse> {
-    const params = new URLSearchParams();
-
-    if (filters?.status) params.set('status', filters.status);
-    if (filters?.priority) params.set('priority', filters.priority);
-    if (filters?.search) params.set('search', filters.search);
-    if (filters?.page) params.set('page', String(filters.page));
-    if (filters?.limit) params.set('limit', String(filters.limit));
-
-    const query = params.toString();
-    const endpoint = query ? `/tasks?${query}` : '/tasks';
-
-    return apiClient.get<TaskListResponse>(endpoint);
+  const endpoint = buildListEndpoint(filters);
+  const raw = await apiClient.get<any>(endpoint);
+  return normalizeTaskListResponse(raw);
 }
 
 /**
  * Get a single task by ID
  */
 export async function getTask(taskId: string): Promise<Task> {
-    return apiClient.get<Task>(`/tasks/${taskId}`);
+  const raw = await apiClient.get<any>(`/tasks/${taskId}`);
+  return normalizeTask(raw);
 }
 
 /**
  * Create a new task
  */
 export async function createTask(data: CreateTaskRequest): Promise<Task> {
-    return apiClient.post<Task>('/tasks', data);
+  const payload = {
+    title: data.title,
+    description: data.description,
+    priority: data.priority,
+    tags: data.tags,
+    deadline: data.deadline, // backend field
+  };
+
+  const raw = await apiClient.post<any>('/tasks', payload);
+  return normalizeTask(raw);
 }
 
 /**
  * Update an existing task
  */
 export async function updateTask(taskId: string, data: UpdateTaskRequest): Promise<Task> {
-    return apiClient.patch<Task>(`/tasks/${taskId}`, data);
+  const payload = {
+    ...data,
+    deadline: data.deadline,
+  };
+
+  const raw = await apiClient.patch<any>(`/tasks/${taskId}`, payload);
+  return normalizeTask(raw);
 }
 
 /**
  * Delete a task
  */
 export async function deleteTask(taskId: string): Promise<void> {
-    return apiClient.delete<void>(`/tasks/${taskId}`);
+  await apiClient.delete<void>(`/tasks/${taskId}`);
 }
 
 /**
- * Mark a task as complete
+ * Mark a task as complete (A): status -> 'done' (kept in DB)
  */
 export async function completeTask(taskId: string): Promise<Task> {
-    return apiClient.patch<Task>(`/tasks/${taskId}`, { status: 'completed' });
+  const raw = await apiClient.patch<any>(`/tasks/${taskId}`, { status: 'done' });
+  return normalizeTask(raw);
 }
 
 /**
- * Reopen a completed task
+ * Reopen a completed task: status -> 'open'
  */
 export async function reopenTask(taskId: string): Promise<Task> {
-    return apiClient.patch<Task>(`/tasks/${taskId}`, { status: 'pending' });
+  const raw = await apiClient.patch<any>(`/tasks/${taskId}`, { status: 'open' });
+  return normalizeTask(raw);
 }

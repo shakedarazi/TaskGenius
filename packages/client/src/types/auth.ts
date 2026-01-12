@@ -5,43 +5,41 @@
  */
 
 /**
- * User entity
+ * User entity (matches backend UserResponse)
  */
 export interface User {
     id: string;
-    email: string;
-    name: string;
-    createdAt: string;
-    updatedAt: string;
+    username: string;
+    created_at: string;
 }
 
 /**
- * Login request payload
+ * Login request payload (matches backend UserLoginRequest)
  */
 export interface LoginRequest {
-    email: string;
+    username: string;
     password: string;
 }
 
 /**
- * Login response with token
+ * Login response (matches backend TokenResponse)
  */
 export interface LoginResponse {
-    user: User;
-    token: string;
-    expiresAt: string;
+    access_token: string;
+    token_type: string;
 }
 
 /**
- * Register request payload
+ * Register request payload (matches backend UserRegisterRequest)
  */
 export interface RegisterRequest {
-    email: string;
+    username: string;
     password: string;
-    name: string;
 }
 
 /**
- * Register response (same as login)
+ * Register response (matches backend MessageResponse)
  */
-export type RegisterResponse = LoginResponse;
+export interface RegisterResponse {
+    message: string;
+}

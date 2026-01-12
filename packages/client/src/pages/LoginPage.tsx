@@ -21,7 +21,7 @@ import { authApi } from '@/api';
 
 export function LoginPage() {
     const navigate = useNavigate();
-    const [email, setEmail] = useState('');
+    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
@@ -32,11 +32,12 @@ export function LoginPage() {
         setLoading(true);
 
         try {
-            await authApi.login({ email, password });
+            await authApi.login({ username, password });
             navigate('/tasks');
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Login failed');
-        } finally {
+        }  catch (err: any) {
+            console.log('[register] error:', err);
+            setError(err?.message || err?.detail || 'Registration failed');
+          } finally {
             setLoading(false);
         }
     };
@@ -49,12 +50,12 @@ export function LoginPage() {
                 {error && <div className="error">{error}</div>}
 
                 <div className="form-group">
-                    <label htmlFor="email">Email</label>
+                    <label htmlFor="username">Username</label>
                     <input
-                        id="email"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        id="username"
+                        type="text"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
                         required
                         disabled={loading}
                     />

@@ -21,8 +21,7 @@ import { authApi } from '@/api';
 
 export function RegisterPage() {
     const navigate = useNavigate();
-    const [name, setName] = useState('');
-    const [email, setEmail] = useState('');
+    const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [error, setError] = useState<string | null>(null);
@@ -40,11 +39,18 @@ export function RegisterPage() {
         setLoading(true);
 
         try {
-            await authApi.register({ name, email, password });
+            // Step 1: Register the user (backend returns message only, no token)
+            await authApi.register({ username, password });
+            
+            // Step 2: Automatically login with the same credentials to get token
+            await authApi.login({ username, password });
+            
+            // Step 3: Navigate only after token is stored
             navigate('/tasks');
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Registration failed');
-        } finally {
+        }  catch (err: any) {
+            console.log('[register] error:', err);
+            setError(err?.message || err?.detail || 'Registration failed');
+          } finally {
             setLoading(false);
         }
     };
@@ -57,25 +63,17 @@ export function RegisterPage() {
                 {error && <div className="error">{error}</div>}
 
                 <div className="form-group">
-                    <label htmlFor="name">Name</label>
+                    <label htmlFor="username">Username</label>
                     <input
-                        id="name"
+                        id="username"
                         type="text"
-                        value={name}
-                        onChange={(e) => setName(e.target.value)}
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
                         required
-                        disabled={loading}
-                    />
-                </div>
-
-                <div className="form-group">
-                    <label htmlFor="email">Email</label>
-                    <input
-                        id="email"
-                        type="email"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        required
+                        minLength={3}
+                        maxLength={50}
+                        pattern="[a-zA-Z0-9_]+"
+                        title="Username must be 3-50 characters, alphanumeric with underscores only"
                         disabled={loading}
                     />
                 </div>

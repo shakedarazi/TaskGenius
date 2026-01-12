@@ -15,23 +15,27 @@ import type {
 } from '@/types';
 
 /**
- * Login with email and password
+ * Login with username and password
  * Stores token on success
  */
 export async function login(credentials: LoginRequest): Promise<LoginResponse> {
     const response = await apiClient.post<LoginResponse>('/auth/login', credentials);
-    setToken(response.token);
+    
+    // Guard: ensure access_token exists
+    if (!response.access_token) {
+        throw new Error('Login response missing access_token');
+    }
+    
+    setToken(response.access_token);
     return response;
 }
 
 /**
  * Register a new user account
- * Stores token on success
+ * Returns message only (no token). Must call login() after successful registration.
  */
 export async function register(data: RegisterRequest): Promise<RegisterResponse> {
-    const response = await apiClient.post<RegisterResponse>('/auth/register', data);
-    setToken(response.token);
-    return response;
+    return apiClient.post<RegisterResponse>('/auth/register', data);
 }
 
 /**
@@ -59,6 +63,12 @@ export async function getMe(): Promise<User> {
  */
 export async function refreshToken(): Promise<LoginResponse> {
     const response = await apiClient.post<LoginResponse>('/auth/refresh');
-    setToken(response.token);
+    
+    // Guard: ensure access_token exists
+    if (!response.access_token) {
+        throw new Error('Refresh response missing access_token');
+    }
+    
+    setToken(response.access_token);
     return response;
 }

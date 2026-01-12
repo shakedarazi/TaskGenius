@@ -9,8 +9,7 @@
  * Task status enum
  * Must match: shared/contracts/enums.json -> TaskStatus
  */
-export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'cancelled';
-
+export type TaskStatus = 'open' | 'in_progress' | 'done' | 'canceled';
 /**
  * Task priority enum
  * Must match: shared/contracts/enums.json -> TaskPriority
@@ -22,16 +21,16 @@ export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
  */
 export interface Task {
     id: string;
-    userId: string;
+    owner_id: string;
     title: string;
     description?: string;
     status: TaskStatus;
     priority: TaskPriority;
     tags?: string[];
-    dueDate?: string;
-    completedAt?: string;
-    createdAt: string;
-    updatedAt: string;
+    deadline?: string;
+    completed_at?: string;
+    created_at: string;
+    updated_at: string;
 }
 
 /**
@@ -42,7 +41,7 @@ export interface CreateTaskRequest {
     description?: string;
     priority?: TaskPriority;
     tags?: string[];
-    dueDate?: string;
+    deadline?: string;
 }
 
 /**
@@ -55,7 +54,7 @@ export interface UpdateTaskRequest {
     status?: TaskStatus;
     priority?: TaskPriority;
     tags?: string[];
-    dueDate?: string;
+    deadline?: string;
 }
 
 /**
@@ -73,7 +72,7 @@ export interface TaskFilters {
  * Task list response
  */
 export interface TaskListResponse {
-    items: Task[];
+    tasks: Task[];
     total: number;
     page: number;
     limit: number;

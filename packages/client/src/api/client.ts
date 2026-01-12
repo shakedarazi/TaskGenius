@@ -12,7 +12,8 @@ import type { ApiError } from '@/types';
 
 // Base URL from environment, fallback to relative path for Vite proxy
 const BASE_URL = import.meta.env.VITE_CORE_API_BASE_URL || '';
-const API_PREFIX = '/api/v1';
+const API_PREFIX = '';
+
 
 /**
  * Storage keys for auth tokens

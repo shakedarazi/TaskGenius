@@ -23,10 +23,12 @@ export default defineConfig({
         port: 5173,
         proxy: {
             // Proxy API requests to core-api during development
+            // Rewrite /api to empty string since backend routes have no /api prefix
             '/api': {
                 target: process.env.VITE_CORE_API_BASE_URL || 'http://localhost:8000',
                 changeOrigin: true,
                 secure: false,
+                rewrite: (path) => path.replace(/^\/api/, ''),
             },
         },
     },
