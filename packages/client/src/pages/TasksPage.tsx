@@ -10,7 +10,7 @@
  * - Refresh button
  */
 
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { tasksApi } from "@/api";
 import { TaskList } from "@/components/TaskList";
 import { TaskForm } from "@/components/TaskForm";
@@ -45,23 +45,40 @@ export function TasksPage() {
 
   const [showForm, setShowForm] = useState(false);
 
+  // AbortController ref to cancel in-flight requests
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Track current request ID to prevent stale updates
+  const requestIdRef = useRef(0);
+
   function sevenDaysAgoISO(): string {
     const d = new Date();
     d.setDate(d.getDate() - 7);
     return d.toISOString();
   }
 
-  // NOTE: mode is a parameter to avoid stale closures and cross-mode double fetch
-  const loadTasks = useCallback(
-    async (mode: ViewMode) => {
-      setLoading(true);
-      setError(null);
+  // Fetch tasks when mode or backend filters change
+  useEffect(() => {
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
 
+    // Increment request ID for this fetch
+    const currentRequestId = ++requestIdRef.current;
+
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    setLoading(true);
+    setError(null);
+
+    const fetchTasks = async () => {
       try {
         const backendFilters: any = { ...(filters as any) };
 
-        if (mode === "active") {
-          // Active contract: /tasks only
+        if (viewMode === "active") {
+          // Active contract: /tasks only (no status, no completed_since)
           delete backendFilters.completed_since;
           delete backendFilters.include_closed;
           delete backendFilters.status;
@@ -72,30 +89,87 @@ export function TasksPage() {
           backendFilters.status = "done" as TaskStatus;
         }
 
-        const response = await tasksApi.listTasks(backendFilters);
-        setTasks(response.tasks);
+        const response = await tasksApi.listTasks(backendFilters, abortController.signal);
+        
+        // Only update state if this is still the latest request and wasn't aborted
+        if (currentRequestId === requestIdRef.current && !abortController.signal.aborted) {
+          setTasks(response.tasks);
+          setLoading(false);
+        }
+      } catch (err: any) {
+        // Ignore abort errors
+        if (err?.name === 'AbortError' || abortController.signal.aborted) {
+          return;
+        }
+        // Only update error if this is still the latest request
+        if (currentRequestId === requestIdRef.current) {
+          setError(err instanceof Error ? err.message : "Failed to load tasks");
+          setLoading(false);
+        }
+      }
+    };
 
-        console.log(
-          "[loadTasks] mode:",
-          mode,
-          "filters:",
-          backendFilters,
-          "response:",
-          response
-        );
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load tasks");
-      } finally {
+    void fetchTasks();
+    
+    // Cleanup: abort request on unmount or when dependencies change
+    return () => {
+      if (abortControllerRef.current === abortController) {
+        abortController.abort();
+      }
+    };
+  }, [viewMode, filters]);
+
+  // Refresh function for manual refresh (button click, mutations)
+  const refreshTasks = useCallback(async () => {
+    // Cancel any in-flight request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Increment request ID for this fetch
+    const currentRequestId = ++requestIdRef.current;
+
+    // Create new AbortController for this request
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const backendFilters: any = { ...(filters as any) };
+
+      if (viewMode === "active") {
+        // Active contract: /tasks only (no status, no completed_since)
+        delete backendFilters.completed_since;
+        delete backendFilters.include_closed;
+        delete backendFilters.status;
+      } else {
+        // Completed contract: /tasks?status=done&completed_since=...
+        delete backendFilters.include_closed;
+        backendFilters.completed_since = sevenDaysAgoISO();
+        backendFilters.status = "done" as TaskStatus;
+      }
+
+      const response = await tasksApi.listTasks(backendFilters, abortController.signal);
+      
+      // Only update state if this is still the latest request and wasn't aborted
+      if (currentRequestId === requestIdRef.current && !abortController.signal.aborted) {
+        setTasks(response.tasks);
         setLoading(false);
       }
-    },
-    [filters]
-  );
-
-  // Fetch tasks when mode or backend filters change
-  useEffect(() => {
-    void loadTasks(viewMode);
-  }, [loadTasks, viewMode]);
+    } catch (err: any) {
+      // Ignore abort errors
+      if (err?.name === 'AbortError' || abortController.signal.aborted) {
+        return;
+      }
+      // Only update error if this is still the latest request
+      if (currentRequestId === requestIdRef.current) {
+        setError(err instanceof Error ? err.message : "Failed to load tasks");
+        setLoading(false);
+      }
+    }
+  }, [viewMode, filters]);
 
   // Apply UI filters client-side (priority + urgency + search)
   const visibleTasks = useMemo(() => {
@@ -111,42 +185,20 @@ export function TasksPage() {
       });
   }, [tasks, priorityFilter, urgencyFilter, search]);
 
-  const handleTaskCreated = (task: Task) => {
-    if (viewMode !== "active") {
-      setShowForm(false);
-      return;
-    }
-
-    if (task.status === "done" || task.status === "canceled") {
-      setShowForm(false);
-      void loadTasks("active");
-      return;
-    }
-
-    setTasks((prev) => [task, ...prev]);
+  const handleTaskCreated = async (task: Task) => {
     setShowForm(false);
+    // Always refresh from server after mutation to ensure consistency
+    await refreshTasks();
   };
 
-  const handleTaskUpdated = (updatedTask: Task) => {
-    setTasks((prev) => {
-      if (viewMode === "active") {
-        if (updatedTask.status === "done" || updatedTask.status === "canceled") {
-          return prev.filter((t) => t.id !== updatedTask.id);
-        }
-      }
-
-      if (viewMode === "completed_7d") {
-        if (updatedTask.status !== "done") {
-          return prev.filter((t) => t.id !== updatedTask.id);
-        }
-      }
-
-      return prev.map((t) => (t.id === updatedTask.id ? updatedTask : t));
-    });
+  const handleTaskUpdated = async (updatedTask: Task) => {
+    // Always refresh from server after mutation to ensure consistency
+    await refreshTasks();
   };
 
-  const handleTaskDeleted = (taskId: string) => {
-    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+  const handleTaskDeleted = async (taskId: string) => {
+    // Always refresh from server after mutation to ensure consistency
+    await refreshTasks();
   };
 
   const isCompletedView = viewMode === "completed_7d";
@@ -202,7 +254,7 @@ export function TasksPage() {
             + New Task
           </button>
 
-          <button onClick={() => loadTasks(viewMode)} disabled={loading}>
+          <button onClick={() => refreshTasks()} disabled={loading}>
             Refresh
           </button>
         </div>

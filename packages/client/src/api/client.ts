@@ -105,13 +105,15 @@ async function request<T>(
     method: string,
     endpoint: string,
     body?: unknown,
-    customHeaders?: HeadersInit
+    customHeaders?: HeadersInit,
+    signal?: AbortSignal
 ): Promise<T> {
     const url = `${BASE_URL}${API_PREFIX}${endpoint}`;
 
     const options: RequestInit = {
         method,
         headers: buildHeaders(customHeaders),
+        signal,
     };
 
     if (body !== undefined) {
@@ -126,16 +128,18 @@ async function request<T>(
  * Typed API client with HTTP method shortcuts
  */
 export const apiClient = {
-    get: <T>(endpoint: string) => request<T>('GET', endpoint),
+    get: <T>(endpoint: string, signal?: AbortSignal) => 
+        request<T>('GET', endpoint, undefined, undefined, signal),
 
-    post: <T>(endpoint: string, body?: unknown) =>
-        request<T>('POST', endpoint, body),
+    post: <T>(endpoint: string, body?: unknown, signal?: AbortSignal) =>
+        request<T>('POST', endpoint, body, undefined, signal),
 
-    put: <T>(endpoint: string, body?: unknown) =>
-        request<T>('PUT', endpoint, body),
+    put: <T>(endpoint: string, body?: unknown, signal?: AbortSignal) =>
+        request<T>('PUT', endpoint, body, undefined, signal),
 
-    patch: <T>(endpoint: string, body?: unknown) =>
-        request<T>('PATCH', endpoint, body),
+    patch: <T>(endpoint: string, body?: unknown, signal?: AbortSignal) =>
+        request<T>('PATCH', endpoint, body, undefined, signal),
 
-    delete: <T>(endpoint: string) => request<T>('DELETE', endpoint),
+    delete: <T>(endpoint: string, signal?: AbortSignal) => 
+        request<T>('DELETE', endpoint, undefined, undefined, signal),
 };

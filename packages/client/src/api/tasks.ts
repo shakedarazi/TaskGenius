@@ -76,9 +76,9 @@ function buildListEndpoint(filters?: ListFilters): string {
 /**
  * Fetch tasks for the current user
  */
-export async function listTasks(filters?: ListFilters): Promise<TaskListResponse> {
+export async function listTasks(filters?: ListFilters, signal?: AbortSignal): Promise<TaskListResponse> {
   const endpoint = buildListEndpoint(filters);
-  const raw = await apiClient.get<any>(endpoint);
+  const raw = await apiClient.get<any>(endpoint, signal);
   return normalizeTaskListResponse(raw);
 }
 
