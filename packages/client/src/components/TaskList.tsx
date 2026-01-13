@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { tasksApi } from '@/api';
 import type { Task } from '@/types';
+import { TaskEditForm } from '@/components/TaskEditForm';
 
 interface TaskListProps {
   tasks: Task[];
@@ -17,6 +18,7 @@ interface TaskListProps {
 
 export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
   const handleToggleComplete = async (task: Task) => {
     setActionLoading(task.id);
@@ -60,39 +62,64 @@ export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) 
 
   return (
     <ul className="task-list">
-      {tasks.map((task) => (
-        <li key={task.id} className={`task-item task-${task.status}`}>
-          <div className="task-content">
-            <h3 className="task-title">{task.title}</h3>
+      {tasks.map((task) => {
+        const isEditing = editingTaskId === task.id;
 
-            {task.description && <p className="task-description">{task.description}</p>}
+        return (
+          <li key={task.id} className={`task-item task-${task.status}`}>
+            <div className="task-content">
+              <h3 className="task-title">{task.title}</h3>
 
-            <div className="task-meta">
-              <span className={`priority priority-${task.priority}`}>{task.priority}</span>
+              {task.description ? <p className="task-description">{task.description}</p> : null}
 
-              {task.deadline && (
-                <span className="due-date">
-                  Due: {new Date(task.deadline).toLocaleDateString()}
-                </span>
+              <div className="task-meta">
+                <span className={`priority priority-${task.priority}`}>{task.priority}</span>
+
+                {task.deadline ? (
+                  <span className="due-date">
+                    Due: {new Date(task.deadline).toLocaleDateString()}
+                  </span>
+                ) : null}
+              </div>
+
+              {isEditing && (
+                <TaskEditForm
+                  task={task}
+                  onUpdated={(updated) => {
+                    onUpdate(updated);
+                    setEditingTaskId(null);
+                  }}
+                  onCancel={() => setEditingTaskId(null)}
+                />
               )}
             </div>
-          </div>
 
-          <div className="task-actions">
-            <button onClick={() => handleToggleComplete(task)} disabled={actionLoading === task.id}>
-              {task.status === 'done' ? 'Reopen' : 'Complete'}
-            </button>
+            <div className="task-actions">
+              <button
+                onClick={() => setEditingTaskId(isEditing ? null : task.id)}
+                disabled={actionLoading === task.id}
+              >
+                {isEditing ? 'Close' : 'Edit'}
+              </button>
 
-            <button
-              onClick={() => handleDelete(task.id)}
-              disabled={actionLoading === task.id}
-              className="delete-btn"
-            >
-              Delete
-            </button>
-          </div>
-        </li>
-      ))}
+              <button
+                onClick={() => handleToggleComplete(task)}
+                disabled={actionLoading === task.id || isEditing}
+              >
+                {task.status === 'done' ? 'Reopen' : 'Complete'}
+              </button>
+
+              <button
+                onClick={() => handleDelete(task.id)}
+                disabled={actionLoading === task.id || isEditing}
+                className="delete-btn"
+              >
+                Delete
+              </button>
+            </div>
+          </li>
+        );
+      })}
     </ul>
   );
 }

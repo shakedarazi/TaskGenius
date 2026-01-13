@@ -37,6 +37,7 @@ class Task:
     estimate_bucket: Optional[EstimateBucket] = None
     created_at: datetime = field(default_factory=_utcnow)
     updated_at: datetime = field(default_factory=_utcnow)
+    completed_at: Optional[datetime] = None
 
     @classmethod
     def create(
@@ -80,6 +81,7 @@ class Task:
             "estimate_bucket": self.estimate_bucket.value if self.estimate_bucket else None,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "completed_at": self.completed_at,
         }
 
     @classmethod
@@ -97,4 +99,5 @@ class Task:
             estimate_bucket=EstimateBucket(data["estimate_bucket"]) if data.get("estimate_bucket") else None,
             created_at=data["created_at"],
             updated_at=data["updated_at"],
+            completed_at=data.get("completed_at"),
         )

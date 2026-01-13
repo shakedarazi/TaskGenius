@@ -133,6 +133,8 @@ class TaskService:
         status: Optional[TaskStatus] = None,
         deadline_before: Optional[datetime] = None,
         deadline_after: Optional[datetime] = None,
+        exclude_statuses: Optional[List[TaskStatus]] = None,
+        completed_since: Optional[datetime] = None,
     ) -> List[TaskResponse]:
         """List tasks for owner with optional filters."""
         tasks = await self.repository.list_by_owner(
@@ -140,6 +142,8 @@ class TaskService:
             status=status,
             deadline_before=deadline_before,
             deadline_after=deadline_after,
+            exclude_statuses=exclude_statuses,
+            completed_since=completed_since,
         )
         return [self._task_to_response(task) for task in tasks]
 
@@ -181,6 +185,20 @@ class TaskService:
         if not updates:
             # No updates provided, just return current task
             return await self.get_task(task_id, owner_id)
+            
+        if request.status is not None:
+            current = await self.repository.get_by_id(task_id, owner_id)
+            if current is None:
+                return None
+            
+            prev_status = current.status
+            next_status = request.status
+
+            if prev_status != TaskStatus.DONE and next_status == TaskStatus.DONE:
+                updates["completed_at"] = self._now()
+
+            if prev_status == TaskStatus.DONE and next_status != TaskStatus.DONE:
+                updates["completed_at"] = None
 
         task = await self.repository.update(task_id, owner_id, updates)
         if task is None:

@@ -85,19 +85,56 @@ async def list_tasks(
         default=None,
         description="Filter tasks with deadline after this date",
     ),
+    include_closed: bool = Query(
+        default=False,
+        description="If true, include DONE/CANCELED tasks. Default is false (active only).",
+    ),
+    completed_since: Optional[datetime] = Query(
+        default=None,
+        description="For DONE tasks: return only tasks with updated_at >= completed_since",
+    ),
 ) -> TaskListResponse:
     """
-    List all tasks for the authenticated user.
-    
-    Supports filtering by status and deadline range.
+    Contract:
+    - Default (no params): ACTIVE only (excludes DONE/CANCELED)
+    - If completed_since is provided:
+        - include_closed must be true
+        - status must be DONE (explicitly or implicitly)
     """
+
+    # Guardrails: completed_since is ONLY for completed view
+    if completed_since is not None and not include_closed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="completed_since requires include_closed=true",
+        )
+
+    if completed_since is not None and status_filter not in (None, TaskStatus.DONE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="completed_since is only supported with status=done",
+        )
+
+    # Default Active view: exclude closed statuses
+    exclude_statuses = None
+    if status_filter is None and not include_closed and completed_since is None:
+        exclude_statuses = [TaskStatus.DONE, TaskStatus.CANCELED]
+
+    # If completed_since provided, force DONE
+    effective_status = status_filter
+    if completed_since is not None:
+        effective_status = TaskStatus.DONE
+
     tasks = await service.list_tasks(
         owner_id=current_user.id,
-        status=status_filter,
+        status=effective_status,
         deadline_before=deadline_before,
         deadline_after=deadline_after,
+        exclude_statuses=exclude_statuses,
+        completed_since=completed_since,
     )
     return TaskListResponse(tasks=tasks, total=len(tasks))
+
 
 
 @router.get(

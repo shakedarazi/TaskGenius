@@ -16,6 +16,12 @@ export type TaskStatus = 'open' | 'in_progress' | 'done' | 'canceled';
  */
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
+
+export type UrgencyLevel = 'no_deadline' | 'overdue' | 'due_today' | 'due_soon' | 'not_soon';
+
+
+
+
 /**
  * Task entity
  */
@@ -27,10 +33,12 @@ export interface Task {
     status: TaskStatus;
     priority: TaskPriority;
     tags?: string[];
-    deadline?: string;
-    completed_at?: string;
+    deadline?: string | null;
+    urgency: UrgencyLevel;
+    //completed_at?: string;
     created_at: string;
     updated_at: string;
+    completed_at: string | null;
 }
 
 /**
@@ -38,10 +46,10 @@ export interface Task {
  */
 export interface CreateTaskRequest {
     title: string;
-    description?: string;
+    description?: string | null;
     priority?: TaskPriority;
     tags?: string[];
-    deadline?: string;
+    deadline?: string | null;
 }
 
 /**
@@ -50,11 +58,11 @@ export interface CreateTaskRequest {
  */
 export interface UpdateTaskRequest {
     title?: string;
-    description?: string;
+    description?: string | null;
     status?: TaskStatus;
     priority?: TaskPriority;
-    tags?: string[];
-    deadline?: string;
+    tags?: string[] | null;
+    deadline?: string | null;
 }
 
 /**
@@ -74,7 +82,7 @@ export interface TaskFilters {
 export interface TaskListResponse {
     tasks: Task[];
     total: number;
-    page: number;
-    limit: number;
-    hasMore: boolean;
+    //page: number;
+    //limit: number;
+    //hasMore: boolean;
 }
