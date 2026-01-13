@@ -10,22 +10,22 @@
  * - Refresh button
  */
 
-import { useMemo, useState, useEffect } from 'react';
-import { tasksApi } from '@/api';
-import { TaskList } from '@/components/TaskList';
-import { TaskForm } from '@/components/TaskForm';
-import { ChatWidget } from '@/components/ChatWidget';
-import type { Task, TaskFilters, TaskPriority, TaskStatus } from '@/types';
+import { useMemo, useState, useEffect, useCallback } from "react";
+import { tasksApi } from "@/api";
+import { TaskList } from "@/components/TaskList";
+import { TaskForm } from "@/components/TaskForm";
+import { ChatWidget } from "@/components/ChatWidget";
+import type { Task, TaskFilters, TaskPriority, TaskStatus } from "@/types";
 
 type UrgencyFilter =
-  | 'any'
-  | 'no_deadline'
-  | 'overdue'
-  | 'due_today'
-  | 'due_soon'
-  | 'not_soon';
+  | "any"
+  | "no_deadline"
+  | "overdue"
+  | "due_today"
+  | "due_soon"
+  | "not_soon";
 
-type ViewMode = 'active' | 'completed_7d';
+type ViewMode = "active" | "completed_7d";
 
 export function TasksPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -33,23 +33,17 @@ export function TasksPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Backend fetch mode
-  const [viewMode, setViewMode] = useState<ViewMode>('active');
+  const [viewMode, setViewMode] = useState<ViewMode>("active");
 
-  // Keep as-is (you already have it)
+  // Backend filters (kept as-is)
   const [filters, setFilters] = useState<TaskFilters>({});
 
-  // New UI-only filters (client-side)
-  const [priorityFilter, setPriorityFilter] = useState<'any' | TaskPriority>('any');
-  const [urgencyFilter, setUrgencyFilter] = useState<UrgencyFilter>('any');
-  const [search, setSearch] = useState('');
+  // UI-only filters (client-side)
+  const [priorityFilter, setPriorityFilter] = useState<"any" | TaskPriority>("any");
+  const [urgencyFilter, setUrgencyFilter] = useState<UrgencyFilter>("any");
+  const [search, setSearch] = useState("");
 
   const [showForm, setShowForm] = useState(false);
-
-  // Fetch tasks on mount and when backend filters/view change
-  useEffect(() => {
-    loadTasks();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters, viewMode]);
 
   function sevenDaysAgoISO(): string {
     const d = new Date();
@@ -57,67 +51,75 @@ export function TasksPage() {
     return d.toISOString();
   }
 
-  const loadTasks = async () => {
-    setLoading(true);
-    setError(null);
+  // NOTE: mode is a parameter to avoid stale closures and cross-mode double fetch
+  const loadTasks = useCallback(
+    async (mode: ViewMode) => {
+      setLoading(true);
+      setError(null);
 
-    try {
-      // Build backend query based on mode
-      const backendFilters: any = { ...(filters as any) };
+      try {
+        const backendFilters: any = { ...(filters as any) };
 
-      if (viewMode === 'active') {
-        // Default backend behavior: active only (include_closed=false)
-        // Ensure we do not accidentally send completed_since from some previous state
-        delete backendFilters.completed_since;
-        delete backendFilters.include_closed;
-      } else {
-        // Completed in last 7 days:
-        // - include_closed=true
-        // - completed_since=<ISO>
-        backendFilters.include_closed = true;
-        backendFilters.completed_since = sevenDaysAgoISO();
+        if (mode === "active") {
+          // Active contract: /tasks only
+          delete backendFilters.completed_since;
+          delete backendFilters.include_closed;
+          delete backendFilters.status;
+        } else {
+          // Completed contract: /tasks?status=done&completed_since=...
+          delete backendFilters.include_closed;
+          backendFilters.completed_since = sevenDaysAgoISO();
+          backendFilters.status = "done" as TaskStatus;
+        }
 
-        // Optional hardening: ensure status=done on client too.
-        // Not required if backend enforces it when completed_since is provided.
-        backendFilters.status = 'done' as TaskStatus;
+        const response = await tasksApi.listTasks(backendFilters);
+        setTasks(response.tasks);
+
+        console.log(
+          "[loadTasks] mode:",
+          mode,
+          "filters:",
+          backendFilters,
+          "response:",
+          response
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Failed to load tasks");
+      } finally {
+        setLoading(false);
       }
+    },
+    [filters]
+  );
 
-      const response = await tasksApi.listTasks(backendFilters);
-      setTasks(response.tasks);
-
-      console.log('[loadTasks] mode:', viewMode, 'filters:', backendFilters, 'response:', response);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load tasks');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Fetch tasks when mode or backend filters change
+  useEffect(() => {
+    void loadTasks(viewMode);
+  }, [loadTasks, viewMode]);
 
   // Apply UI filters client-side (priority + urgency + search)
   const visibleTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
 
     return tasks
-      .filter((t) => (priorityFilter === 'any' ? true : t.priority === priorityFilter))
-      .filter((t) => (urgencyFilter === 'any' ? true : (t.urgency as any) === urgencyFilter))
+      .filter((t) => (priorityFilter === "any" ? true : t.priority === priorityFilter))
+      .filter((t) => (urgencyFilter === "any" ? true : (t.urgency as any) === urgencyFilter))
       .filter((t) => {
         if (!q) return true;
-        const hay = `${t.title ?? ''} ${t.description ?? ''}`.toLowerCase();
+        const hay = `${t.title ?? ""} ${t.description ?? ""}`.toLowerCase();
         return hay.includes(q);
       });
   }, [tasks, priorityFilter, urgencyFilter, search]);
 
   const handleTaskCreated = (task: Task) => {
-    // In completed view, a newly created task shouldn't appear (it's not done)
-    if (viewMode !== 'active') {
+    if (viewMode !== "active") {
       setShowForm(false);
       return;
     }
 
-    // If created task is done/canceled (unlikely), just refresh
-    if (task.status === 'done' || task.status === 'canceled') {
+    if (task.status === "done" || task.status === "canceled") {
       setShowForm(false);
-      void loadTasks();
+      void loadTasks("active");
       return;
     }
 
@@ -127,21 +129,18 @@ export function TasksPage() {
 
   const handleTaskUpdated = (updatedTask: Task) => {
     setTasks((prev) => {
-      // ACTIVE view: if it becomes done/canceled, remove from the list
-      if (viewMode === 'active') {
-        if (updatedTask.status === 'done' || updatedTask.status === 'canceled') {
+      if (viewMode === "active") {
+        if (updatedTask.status === "done" || updatedTask.status === "canceled") {
           return prev.filter((t) => t.id !== updatedTask.id);
         }
       }
 
-      // COMPLETED view: if it stops being done, remove from completed list
-      if (viewMode === 'completed_7d') {
-        if (updatedTask.status !== 'done') {
+      if (viewMode === "completed_7d") {
+        if (updatedTask.status !== "done") {
           return prev.filter((t) => t.id !== updatedTask.id);
         }
       }
 
-      // Otherwise update in-place
       return prev.map((t) => (t.id === updatedTask.id ? updatedTask : t));
     });
   };
@@ -150,15 +149,14 @@ export function TasksPage() {
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
   };
 
-  const isCompletedView = viewMode === 'completed_7d';
+  const isCompletedView = viewMode === "completed_7d";
 
   return (
     <div className="tasks-page">
       <header className="tasks-header">
-        <h1>{isCompletedView ? 'Completed (last 7 days)' : 'My Tasks'}</h1>
+        <h1>{isCompletedView ? "Completed (last 7 days)" : "My Tasks"}</h1>
 
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {/* View toggle (backend fetch mode) */}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <select
             value={viewMode}
             onChange={(e) => setViewMode(e.target.value as ViewMode)}
@@ -168,7 +166,6 @@ export function TasksPage() {
             <option value="completed_7d">View: Completed (7 days)</option>
           </select>
 
-          {/* UI filters (client-side) */}
           <input
             type="text"
             placeholder="Search..."
@@ -201,12 +198,11 @@ export function TasksPage() {
             <option value="no_deadline">Urgency: No deadline</option>
           </select>
 
-          {/* Only allow creating tasks in Active view */}
           <button onClick={() => setShowForm(true)} disabled={isCompletedView}>
             + New Task
           </button>
 
-          <button onClick={loadTasks} disabled={loading}>
+          <button onClick={() => loadTasks(viewMode)} disabled={loading}>
             Refresh
           </button>
         </div>
@@ -225,7 +221,6 @@ export function TasksPage() {
         onDelete={handleTaskDeleted}
       />
 
-      {/* Floating chat widget for conversational task creation */}
       {!isCompletedView && <ChatWidget onTaskCreated={handleTaskCreated} />}
     </div>
   );

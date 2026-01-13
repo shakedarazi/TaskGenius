@@ -102,12 +102,6 @@ async def list_tasks(
         - status must be DONE (explicitly or implicitly)
     """
 
-    # Guardrails: completed_since is ONLY for completed view
-    if completed_since is not None and not include_closed:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="completed_since requires include_closed=true",
-        )
 
     if completed_since is not None and status_filter not in (None, TaskStatus.DONE):
         raise HTTPException(

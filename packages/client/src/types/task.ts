@@ -35,7 +35,6 @@ export interface Task {
     tags?: string[];
     deadline?: string | null;
     urgency: UrgencyLevel;
-    //completed_at?: string;
     created_at: string;
     updated_at: string;
     completed_at: string | null;

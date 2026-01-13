@@ -66,8 +66,8 @@ function buildListEndpoint(filters?: ListFilters): string {
   if (filters?.limit) params.set('limit', String(filters.limit));
 
   // Extra backend filters
-  if (filters?.include_closed === true) params.set('include_closed', 'true');
   if (filters?.completed_since) params.set('completed_since', filters.completed_since);
+  if (filters?.include_closed === true) params.set('include_closed', 'true');
 
   const query = params.toString();
   return query ? `/tasks?${query}` : '/tasks';
