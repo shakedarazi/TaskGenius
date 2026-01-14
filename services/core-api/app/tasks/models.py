@@ -25,7 +25,7 @@ def _utcnow() -> datetime:
 @dataclass
 class Task:
     """Task entity for database storage."""
-
+    
     id: str
     owner_id: str
     title: str
