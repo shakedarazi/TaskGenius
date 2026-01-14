@@ -48,3 +48,34 @@ class TelegramSendMessageResponse(BaseModel):
 
     ok: bool = Field(description="Whether the request was successful")
     result: Optional[dict] = Field(default=None, description="Result object if successful")
+
+
+class TelegramLinkStartResponse(BaseModel):
+    """Response when starting Telegram linking flow."""
+
+    code: str = Field(description="Verification code to send to the Telegram bot")
+    expires_in_seconds: int = Field(description="Validity window for the code in seconds")
+
+
+class TelegramStatusResponse(BaseModel):
+    """Current Telegram linking status for the authenticated user."""
+
+    linked: bool = Field(description="Whether the user is linked to a Telegram account")
+    telegram_username: Optional[str] = Field(
+        default=None, description="Linked Telegram username if available"
+    )
+    notifications_enabled: bool = Field(
+        description="Whether Telegram notifications are enabled for this user"
+    )
+
+
+class TelegramNotificationsToggleRequest(BaseModel):
+    """Request body to enable/disable Telegram notifications."""
+
+    enabled: bool = Field(description="Enable or disable Telegram notifications")
+
+
+class TelegramUnlinkResponse(BaseModel):
+    """Response after unlinking Telegram account."""
+
+    unlinked: bool = Field(description="Whether unlinking succeeded")

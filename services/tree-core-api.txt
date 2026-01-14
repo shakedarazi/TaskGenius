@@ -1,0 +1,128 @@
+Folder PATH listing for volume OS
+Volume serial number is 76B9-A4F4
+C:.
+|   Dockerfile
+|   pytest.ini
+|   requirements.txt
+|   SECURITY.md
+|   
++---.pytest_cache
+|   |   .gitignore
+|   |   CACHEDIR.TAG
+|   |   README.md
+|   |   
+|   \---v
+|       \---cache
+|               lastfailed
+|               nodeids
+|               
++---app
+|   |   config.py
+|   |   database.py
+|   |   main.py
+|   |   security.py
+|   |   __init__.py
+|   |   
+|   +---auth
+|   |   |   dependencies.py
+|   |   |   models.py
+|   |   |   repository.py
+|   |   |   router.py
+|   |   |   schemas.py
+|   |   |   service.py
+|   |   |   __init__.py
+|   |   |   
+|   |   \---__pycache__
+|   |           dependencies.cpython-313.pyc
+|   |           models.cpython-313.pyc
+|   |           repository.cpython-313.pyc
+|   |           router.cpython-313.pyc
+|   |           schemas.cpython-313.pyc
+|   |           service.cpython-313.pyc
+|   |           __init__.cpython-313.pyc
+|   |           
+|   +---chat
+|   |   |   router.py
+|   |   |   schemas.py
+|   |   |   service.py
+|   |   |   __init__.py
+|   |   |   
+|   |   \---__pycache__
+|   |           router.cpython-313.pyc
+|   |           schemas.cpython-313.pyc
+|   |           service.cpython-313.pyc
+|   |           __init__.cpython-313.pyc
+|   |           
+|   +---insights
+|   |   |   router.py
+|   |   |   schemas.py
+|   |   |   service.py
+|   |   |   __init__.py
+|   |   |   
+|   |   \---__pycache__
+|   |           router.cpython-313.pyc
+|   |           schemas.cpython-313.pyc
+|   |           service.cpython-313.pyc
+|   |           __init__.cpython-313.pyc
+|   |           
+|   +---tasks
+|   |   |   enums.py
+|   |   |   models.py
+|   |   |   repository.py
+|   |   |   router.py
+|   |   |   schemas.py
+|   |   |   service.py
+|   |   |   __init__.py
+|   |   |   
+|   |   \---__pycache__
+|   |           enums.cpython-313.pyc
+|   |           models.cpython-313.pyc
+|   |           repository.cpython-313.pyc
+|   |           router.cpython-313.pyc
+|   |           schemas.cpython-313.pyc
+|   |           service.cpython-313.pyc
+|   |           __init__.cpython-313.pyc
+|   |           
+|   +---telegram
+|   |   |   adapter.py
+|   |   |   router.py
+|   |   |   schemas.py
+|   |   |   service.py
+|   |   |   __init__.py
+|   |   |   
+|   |   \---__pycache__
+|   |           adapter.cpython-313.pyc
+|   |           router.cpython-313.pyc
+|   |           schemas.cpython-313.pyc
+|   |           service.cpython-313.pyc
+|   |           __init__.cpython-313.pyc
+|   |           
+|   \---__pycache__
+|           config.cpython-313.pyc
+|           database.cpython-313.pyc
+|           main.cpython-313.pyc
+|           security.cpython-313.pyc
+|           __init__.cpython-313.pyc
+|           
+\---tests
+    |   conftest.py
+    |   test_auth.py
+    |   test_chat.py
+    |   test_health.py
+    |   test_insights.py
+    |   test_tasks.py
+    |   test_telegram.py
+    |   test_urgency.py
+    |   __init__.py
+    |   
+    \---__pycache__
+            conftest.cpython-313-pytest-8.4.2.pyc
+            test_auth.cpython-313-pytest-8.4.2.pyc
+            test_chat.cpython-313-pytest-8.4.2.pyc
+            test_health.cpython-313-pytest-8.4.2.pyc
+            test_insights.cpython-313-pytest-8.4.2.pyc
+            test_tasks.cpython-313-pytest-8.4.2.pyc
+            test_telegram.cpython-313-pytest-8.4.2.pyc
+            test_urgency.cpython-313-pytest-8.4.2.pyc
+            __init__.cpython-313.pyc
+            

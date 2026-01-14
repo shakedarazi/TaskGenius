@@ -39,6 +39,7 @@ export function Layout({ children }: LayoutProps) {
                         {authenticated ? (
                             <>
                                 <Link to="/tasks">Tasks</Link>
+                                <Link to="/settings">Settings</Link>
                                 <button onClick={handleLogout} className="logout-btn">
                                     Logout
                                 </button>

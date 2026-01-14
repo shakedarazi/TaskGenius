@@ -9,3 +9,4 @@ export { apiClient } from './client';
 export * as authApi from './auth';
 export * as tasksApi from './tasks';
 export * as chatApi from './chat';
+export * as telegramApi from './telegram';

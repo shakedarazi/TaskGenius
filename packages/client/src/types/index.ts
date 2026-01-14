@@ -8,6 +8,7 @@
 export * from './auth';
 export * from './task';
 export * from './chat';
+export * from './telegram';
 
 /**
  * Generic API error response
