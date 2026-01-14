@@ -4,8 +4,12 @@ TASKGENIUS Core API - Authentication Router
 Endpoints for user registration, login, and current user info.
 """
 
-from fastapi import APIRouter, HTTPException, status
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+from app.database import get_database
 from app.auth.schemas import (
     UserRegisterRequest,
     UserLoginRequest,
@@ -13,8 +17,17 @@ from app.auth.schemas import (
     TokenResponse,
     MessageResponse,
 )
-from app.auth.service import auth_service
+from app.auth.service import AuthService
+from app.auth.repository import MongoUserRepository
 from app.auth.dependencies import CurrentUser
+
+
+def get_auth_service(
+    db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
+) -> AuthService:
+    """Dependency to get AuthService instance with MongoDB repository."""
+    user_repo = MongoUserRepository(db)
+    return AuthService(user_repo)
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -26,14 +39,17 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user",
 )
-async def register(request: UserRegisterRequest) -> MessageResponse:
+async def register(
+    request: UserRegisterRequest,
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+) -> MessageResponse:
     """
     Register a new user with username and password.
     
     - Username must be 3-50 characters, alphanumeric with underscores
     - Password must be 8-128 characters
     """
-    user = auth_service.register_user(
+    user = await auth_service.register_user(
         username=request.username,
         password=request.password,
     )
@@ -52,14 +68,17 @@ async def register(request: UserRegisterRequest) -> MessageResponse:
     response_model=TokenResponse,
     summary="Login and get access token",
 )
-async def login(request: UserLoginRequest) -> TokenResponse:
+async def login(
+    request: UserLoginRequest,
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+) -> TokenResponse:
     """
     Authenticate user and return JWT access token.
     
     Use the returned token in the Authorization header:
     `Authorization: Bearer <token>`
     """
-    user = auth_service.authenticate_user(
+    user = await auth_service.authenticate_user(
         username=request.username,
         password=request.password,
     )

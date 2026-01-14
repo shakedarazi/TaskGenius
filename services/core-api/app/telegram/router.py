@@ -13,8 +13,8 @@ from app.database import get_database
 from app.tasks.repository import TaskRepositoryInterface
 from app.tasks.router import get_task_repository
 from app.auth.dependencies import CurrentUser
+from app.auth.repository import MongoUserRepository
 from app.telegram.repository import (
-    MongoUserTelegramLinkRepository,
     MongoTelegramVerificationRepository,
     MongoTelegramUpdateRepository,
 )
@@ -35,12 +35,12 @@ async def get_telegram_service(
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
 ) -> TelegramService:
     """Dependency to get Telegram service instance with MongoDB repositories."""
-    link_repo = MongoUserTelegramLinkRepository(db)
+    user_repo = MongoUserRepository(db)
     verification_repo = MongoTelegramVerificationRepository(db)
     update_repo = MongoTelegramUpdateRepository(db)
     return TelegramService(
         db=db,
-        link_repository=link_repo,
+        user_repository=user_repo,
         verification_repository=verification_repo,
         update_repository=update_repo,
     )
@@ -84,9 +84,9 @@ async def telegram_webhook_info() -> dict:
     }
 
 
-def _get_link_repo(db: AsyncIOMotorDatabase) -> MongoUserTelegramLinkRepository:
-    """Helper to get link repository instance."""
-    return MongoUserTelegramLinkRepository(db)
+def _get_user_repo(db: AsyncIOMotorDatabase) -> MongoUserRepository:
+    """Helper to get user repository instance."""
+    return MongoUserRepository(db)
 
 
 def _get_verification_repo(db: AsyncIOMotorDatabase) -> MongoTelegramVerificationRepository:
@@ -134,13 +134,9 @@ async def start_telegram_link(
 @router.get("/status", response_model=TelegramStatusResponse)
 async def get_telegram_status(
     current_user: CurrentUser,
-    db: Annotated[AsyncIOMotorDatabase, Depends(get_database)],
 ) -> TelegramStatusResponse:
     """Return current Telegram linking status for the authenticated user."""
-    link_repo = _get_link_repo(db)
-    link = await link_repo.get_by_user_id(current_user.id)
-    
-    if not link:
+    if not current_user.telegram:
         return TelegramStatusResponse(
             linked=False,
             telegram_username=None,
@@ -149,8 +145,8 @@ async def get_telegram_status(
     
     return TelegramStatusResponse(
         linked=True,
-        telegram_username=link.telegram_username,
-        notifications_enabled=link.notifications_enabled,
+        telegram_username=current_user.telegram.telegram_username,
+        notifications_enabled=current_user.telegram.notifications_enabled,
     )
 
 
@@ -160,8 +156,8 @@ async def unlink_telegram(
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)],
 ) -> TelegramUnlinkResponse:
     """Unlink Telegram account from the authenticated user."""
-    link_repo = _get_link_repo(db)
-    await link_repo.delete_for_user(current_user.id)
+    user_repo = _get_user_repo(db)
+    await user_repo.remove_telegram_link(current_user.id)
     return TelegramUnlinkResponse(unlinked=True)
 
 
@@ -176,21 +172,26 @@ async def toggle_telegram_notifications(
     
     Requires that the user has already linked their Telegram account.
     """
-    link_repo = _get_link_repo(db)
-    await link_repo.set_notifications_enabled(current_user.id, body.enabled)
+    user_repo = _get_user_repo(db)
     
-    # Return updated status
-    link = await link_repo.get_by_user_id(current_user.id)
-    if not link:
-        # No mapping exists, but we tried to set flag (edge case)
-        return TelegramStatusResponse(
-            linked=False,
-            telegram_username=None,
-            notifications_enabled=body.enabled,
+    # Check if user has Telegram link before trying to update
+    if not current_user.telegram:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Telegram account not linked.",
+        )
+    
+    # Update notifications (only if telegram link exists)
+    user = await user_repo.set_notifications_enabled(current_user.id, body.enabled)
+    if not user or not user.telegram:
+        # This shouldn't happen if we checked above, but handle edge case
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Telegram account not linked.",
         )
     
     return TelegramStatusResponse(
         linked=True,
-        telegram_username=link.telegram_username,
-        notifications_enabled=link.notifications_enabled,
+        telegram_username=user.telegram.telegram_username,
+        notifications_enabled=user.telegram.notifications_enabled,
     )

@@ -11,10 +11,10 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.telegram.adapter import TelegramAdapter
 from app.telegram.repository import (
-    UserTelegramLinkRepositoryInterface,
     TelegramVerificationRepositoryInterface,
     TelegramUpdateRepositoryInterface,
 )
+from app.auth.repository import MongoUserRepository
 from app.telegram.schemas import TelegramUpdate, TelegramMessage
 from app.chat.service import ChatService
 from app.tasks.repository import TaskRepositoryInterface
@@ -35,14 +35,14 @@ class TelegramService:
     def __init__(
         self,
         db: AsyncIOMotorDatabase,
-        link_repository: Optional[UserTelegramLinkRepositoryInterface] = None,
+        user_repository: Optional[MongoUserRepository] = None,
         verification_repository: Optional[TelegramVerificationRepositoryInterface] = None,
         update_repository: Optional[TelegramUpdateRepositoryInterface] = None,
     ):
         self.db = db
         self.telegram_adapter = TelegramAdapter()
         self.chat_service = ChatService(db)
-        self.link_repository = link_repository
+        self.user_repository = user_repository
         self.verification_repository = verification_repository
         self.update_repository = update_repository
         # Keep in-memory fallback for backward compatibility
@@ -161,18 +161,20 @@ class TelegramService:
                 return
 
             # Create or update user-telegram link
-            if not self.link_repository:
+            if not self.user_repository:
                 await self.telegram_adapter.send_message(
                     chat_id=telegram_chat_id,
                     text="Account linking is not available. Please contact support.",
                 )
                 return
 
-            link = await self.link_repository.upsert_link(
+            # Update user's telegram field
+            await self.user_repository.update_telegram_link(
                 user_id=verification.user_id,
                 telegram_user_id=telegram_user_id,
                 telegram_chat_id=telegram_chat_id,
                 telegram_username=telegram_username,
+                notifications_enabled=False,  # Default to disabled
             )
 
             # Mark code as used
@@ -202,11 +204,11 @@ class TelegramService:
             Application user ID if mapping exists, None otherwise
         """
         # Try MongoDB repository first
-        if self.link_repository:
+        if self.user_repository:
             try:
-                link = await self.link_repository.get_by_telegram_user_id(telegram_user_id)
-                if link:
-                    return link.user_id
+                user = await self.user_repository.get_by_telegram_user_id(telegram_user_id)
+                if user and user.telegram:
+                    return user.id
             except Exception:
                 # If DB query fails, fall back to in-memory
                 pass
@@ -227,12 +229,12 @@ class TelegramService:
         """
         self._user_mappings[telegram_user_id] = app_user_id
         # Also try to persist to MongoDB if repository is available
-        if self.link_repository:
+        if self.user_repository:
             try:
                 # Note: This doesn't have chat_id/username, but preserves backward compatibility
                 # In production, users should use verification flow instead
                 asyncio.create_task(
-                    self.link_repository.upsert_link(
+                    self.user_repository.update_telegram_link(
                         user_id=app_user_id,
                         telegram_user_id=telegram_user_id,
                         telegram_chat_id=0,  # Unknown, will be updated on next webhook

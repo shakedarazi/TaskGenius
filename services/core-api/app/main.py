@@ -17,6 +17,7 @@ from app.tasks import tasks_router
 from app.insights import insights_router
 from app.chat import chat_router
 from app.telegram import telegram_router
+from app.telegram.scheduler import WeeklySummaryScheduler
 from app.security import validate_security_config
 
 
@@ -27,7 +28,15 @@ async def lifespan(app: FastAPI):
     validate_security_config()
     # Startup: Connect to MongoDB
     await database.connect()
+    
+    # Startup: Start weekly summary scheduler
+    scheduler = WeeklySummaryScheduler(database.get_database())
+    await scheduler.start()
+    
     yield
+    
+    # Shutdown: Stop scheduler
+    await scheduler.stop()
     # Shutdown: Disconnect from MongoDB
     await database.disconnect()
 

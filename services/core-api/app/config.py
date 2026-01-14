@@ -31,6 +31,10 @@ class Settings:
 
     # Telegram Bot
     TELEGRAM_BOT_TOKEN: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN", None)
+    
+    # Telegram Weekly Summary Scheduler
+    TELEGRAM_WEEKLY_SUMMARY_ENABLED: bool = os.getenv("TELEGRAM_WEEKLY_SUMMARY_ENABLED", "false").lower() == "true"
+    TELEGRAM_WEEKLY_SUMMARY_INTERVAL_SECONDS: int = int(os.getenv("TELEGRAM_WEEKLY_SUMMARY_INTERVAL_SECONDS", str(7 * 24 * 60 * 60)))  # Default: 7 days
 
     # CORS - Allowed origins for client requests
     # In production, set to specific origins like "https://taskgenius.example.com"

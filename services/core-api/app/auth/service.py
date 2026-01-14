@@ -12,7 +12,7 @@ from jose import jwt, JWTError
 
 from app.config import settings
 from app.auth.models import User
-from app.auth.repository import user_repository, UserRepositoryInterface
+from app.auth.repository import UserRepositoryInterface
 
 
 class AuthService:
@@ -66,28 +66,27 @@ class AuthService:
         except JWTError:
             return None
 
-    def register_user(self, username: str, password: str) -> Optional[User]:
+    async def register_user(self, username: str, password: str) -> Optional[User]:
         """Register a new user. Returns None if username exists."""
-        if self.repository.exists_by_username(username):
+        if await self.repository.exists_by_username(username):
             return None
 
         password_hash = self.hash_password(password)
         user = User.create(username=username, password_hash=password_hash)
-        return self.repository.create(user)
+        return await self.repository.create(user)
 
-    def authenticate_user(self, username: str, password: str) -> Optional[User]:
+    async def authenticate_user(self, username: str, password: str) -> Optional[User]:
         """Authenticate user by username and password."""
-        user = self.repository.get_by_username(username)
+        user = await self.repository.get_by_username(username)
         if user is None:
             return None
         if not self.verify_password(password, user.password_hash):
             return None
         return user
 
-    def get_user_by_id(self, user_id: str) -> Optional[User]:
+    async def get_user_by_id(self, user_id: str) -> Optional[User]:
         """Get user by ID."""
-        return self.repository.get_by_id(user_id)
+        return await self.repository.get_by_id(user_id)
 
 
-# Singleton instance
-auth_service = AuthService(user_repository)
+# Note: auth_service singleton removed - must be created with database dependency
