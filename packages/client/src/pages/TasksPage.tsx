@@ -11,11 +11,11 @@
  */
 
 import { useMemo, useState, useEffect, useRef, useCallback } from "react";
-import { tasksApi } from "@/api";
+import { tasksApi, telegramApi } from "@/api";
 import { TaskList } from "@/components/TaskList";
 import { TaskForm } from "@/components/TaskForm";
 import { ChatWidget } from "@/components/ChatWidget";
-import type { Task, TaskFilters, TaskPriority, TaskStatus } from "@/types";
+import type { Task, TaskFilters, TaskPriority, TaskStatus, TelegramStatus } from "@/types";
 
 type UrgencyFilter =
   | "any"
@@ -44,6 +44,11 @@ export function TasksPage() {
   const [search, setSearch] = useState("");
 
   const [showForm, setShowForm] = useState(false);
+  
+  // Telegram status for summary button
+  const [telegramStatus, setTelegramStatus] = useState<TelegramStatus | null>(null);
+  const [sendingSummary, setSendingSummary] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   // AbortController ref to cancel in-flight requests
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -118,6 +123,20 @@ export function TasksPage() {
       }
     };
   }, [viewMode, filters]);
+
+  // Load Telegram status on mount
+  useEffect(() => {
+    const loadTelegramStatus = async () => {
+      try {
+        const status = await telegramApi.getTelegramStatus();
+        setTelegramStatus(status);
+      } catch (err) {
+        // Silently fail - user might not have Telegram linked
+        setTelegramStatus(null);
+      }
+    };
+    void loadTelegramStatus();
+  }, []);
 
   // Refresh function for manual refresh (button click, mutations)
   const refreshTasks = useCallback(async () => {
@@ -201,6 +220,30 @@ export function TasksPage() {
     await refreshTasks();
   };
 
+  const handleSendSummary = async () => {
+    if (!telegramStatus?.linked) {
+      setSummaryError("Please link your Telegram account first");
+      return;
+    }
+
+    setSendingSummary(true);
+    setSummaryError(null);
+
+    try {
+      await telegramApi.sendWeeklySummary();
+      setSummaryError(null);
+      // Show success message with notification status info
+      const message = telegramStatus.notifications_enabled
+        ? "Weekly summary sent to Telegram! You'll also receive automatic summaries every 7 days."
+        : "Weekly summary sent to Telegram! Note: Automatic summaries are disabled. Enable them in Settings to receive weekly summaries automatically.";
+      alert(message);
+    } catch (err: any) {
+      setSummaryError(err instanceof Error ? err.message : "Failed to send summary");
+    } finally {
+      setSendingSummary(false);
+    }
+  };
+
   const isCompletedView = viewMode === "completed_7d";
 
   return (
@@ -257,10 +300,39 @@ export function TasksPage() {
           <button onClick={() => refreshTasks()} disabled={loading}>
             Refresh
           </button>
+
+          {telegramStatus?.linked && (
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button 
+                onClick={handleSendSummary} 
+                disabled={sendingSummary || isCompletedView}
+                title={
+                  telegramStatus.notifications_enabled
+                    ? "Send weekly summary to Telegram"
+                    : "Send weekly summary to Telegram (notifications are disabled - you won't receive automatic weekly summaries)"
+                }
+              >
+                {sendingSummary ? "Sending..." : "📊 Send Summary"}
+              </button>
+              {!telegramStatus.notifications_enabled && (
+                <span 
+                  style={{ 
+                    fontSize: "0.85em", 
+                    color: "#666",
+                    fontStyle: "italic" 
+                  }}
+                  title="Automatic weekly summaries are disabled. Enable them in Settings to receive summaries every 7 days."
+                >
+                  (Auto: Off)
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </header>
 
       {error && <div className="error">{error}</div>}
+      {summaryError && <div className="error">{summaryError}</div>}
 
       {showForm && !isCompletedView && (
         <TaskForm onSubmit={handleTaskCreated} onCancel={() => setShowForm(false)} />

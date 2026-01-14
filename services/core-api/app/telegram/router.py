@@ -24,8 +24,14 @@ from app.telegram.schemas import (
     TelegramStatusResponse,
     TelegramNotificationsToggleRequest,
     TelegramUnlinkResponse,
+    TelegramSummarySendResponse,
 )
 from app.telegram.service import TelegramService
+from app.telegram.weekly_service import TelegramWeeklySummaryService
+from app.telegram.weekly_repository import MongoTelegramWeeklySummaryRepository
+from app.telegram.adapter import TelegramAdapter
+from app.tasks.repository import TaskRepository
+from app.insights.service import InsightsService
 
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
@@ -194,4 +200,56 @@ async def toggle_telegram_notifications(
         linked=True,
         telegram_username=user.telegram.telegram_username,
         notifications_enabled=user.telegram.notifications_enabled,
+    )
+
+
+async def get_weekly_summary_service(
+    db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
+) -> TelegramWeeklySummaryService:
+    """Dependency to get TelegramWeeklySummaryService instance."""
+    user_repo = MongoUserRepository(db)
+    summary_repo = MongoTelegramWeeklySummaryRepository(db)
+    task_repo = TaskRepository(db)
+    insights_service = InsightsService()
+    telegram_adapter = TelegramAdapter()
+    return TelegramWeeklySummaryService(
+        db=db,
+        user_repo=user_repo,
+        summary_repo=summary_repo,
+        task_repo=task_repo,
+        insights_service=insights_service,
+        telegram_adapter=telegram_adapter,
+    )
+
+
+@router.post("/summary/send", response_model=TelegramSummarySendResponse)
+async def send_weekly_summary(
+    current_user: CurrentUser,
+    weekly_summary_service: Annotated[TelegramWeeklySummaryService, Depends(get_weekly_summary_service)],
+) -> TelegramSummarySendResponse:
+    """
+    Send weekly summary to Telegram for the authenticated user (on-demand).
+    
+    This endpoint allows manual triggering of the weekly summary, bypassing
+    the scheduled job and idempotency checks. Useful for testing or immediate delivery.
+    
+    Requires that the user has already linked their Telegram account.
+    """
+    if not current_user.telegram:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Telegram account not linked.",
+        )
+    
+    success, message = await weekly_summary_service.send_summary_for_user(current_user.id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=message,
+        )
+    
+    return TelegramSummarySendResponse(
+        sent=True,
+        message=message,
     )

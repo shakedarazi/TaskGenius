@@ -155,3 +155,62 @@ class TelegramWeeklySummaryService:
 
         except Exception as e:
             logger.error(f"Error in weekly summary job: {e}", exc_info=True)
+
+    async def send_summary_for_user(self, user_id: str) -> tuple[bool, str]:
+        """
+        Send weekly summary to a specific user on-demand (manual trigger).
+        
+        This method:
+        - Does NOT check idempotency (allows multiple sends)
+        - Fetches user's tasks
+        - Generates summary
+        - Sends via Telegram
+        - Does NOT mark as sent in summary_repo (to allow manual re-sends)
+        
+        Args:
+            user_id: The user ID to send summary for
+            
+        Returns:
+            Tuple of (success: bool, message: str)
+        """
+        try:
+            # Get user
+            user = await self.user_repo.get_by_id(user_id)
+            if not user:
+                return False, "User not found"
+            
+            if not user.telegram:
+                return False, "Telegram account not linked"
+            
+            # Log warning if notifications are disabled (manual send still allowed)
+            if not user.telegram.notifications_enabled:
+                logger.info(f"Manual summary send for user {user_id} (notifications disabled - automatic summaries won't be sent)")
+            
+            # Fetch user's tasks
+            tasks = await self.task_repo.list_by_owner(user_id)
+            logger.debug(f"Found {len(tasks)} tasks for user {user_id}")
+            
+            # Generate summary
+            now = datetime.now(timezone.utc)
+            summary = self.insights_service.generate_weekly_summary(tasks, now)
+            
+            # Format as Telegram message
+            message_text = self._format_summary_for_telegram(summary)
+            
+            # Send via Telegram
+            response = await self.telegram_adapter.send_message(
+                chat_id=user.telegram.telegram_chat_id,
+                text=message_text,
+                parse_mode="Markdown",
+            )
+            
+            if response.ok:
+                logger.info(f"Sent weekly summary to user {user_id} (chat {user.telegram.telegram_chat_id})")
+                return True, "Summary sent successfully"
+            else:
+                logger.warning(f"Failed to send weekly summary to user {user_id}: {response}")
+                return False, f"Failed to send: {response}"
+                
+        except Exception as e:
+            logger.error(f"Error sending weekly summary to user {user_id}: {e}", exc_info=True)
+            return False, f"Error: {str(e)}"

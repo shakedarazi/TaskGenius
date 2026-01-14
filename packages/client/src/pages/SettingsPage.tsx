@@ -206,8 +206,17 @@ export function SettingsPage() {
                                         }
                                         disabled={loading}
                                     />
-                                    <span>Enable Telegram notifications</span>
+                                    <span>Enable automatic weekly summaries</span>
                                 </label>
+                                <p style={{ 
+                                    fontSize: "0.9em", 
+                                    color: "#666", 
+                                    marginTop: "4px",
+                                    marginLeft: "24px" 
+                                }}>
+                                    When enabled, you'll receive a weekly task summary every 7 days automatically. 
+                                    You can always send a summary manually using the "Send Summary" button on the Tasks page.
+                                </p>
                             </div>
                         </div>
                     )}

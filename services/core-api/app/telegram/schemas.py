@@ -79,3 +79,10 @@ class TelegramUnlinkResponse(BaseModel):
     """Response after unlinking Telegram account."""
 
     unlinked: bool = Field(description="Whether unlinking succeeded")
+
+
+class TelegramSummarySendResponse(BaseModel):
+    """Response after sending weekly summary to Telegram."""
+
+    sent: bool = Field(description="Whether the summary was sent successfully")
+    message: Optional[str] = Field(default=None, description="Status message or error details")

@@ -38,3 +38,11 @@ export async function unlinkTelegram(): Promise<void> {
 export async function setTelegramNotifications(enabled: boolean): Promise<TelegramStatus> {
     return apiClient.patch<TelegramStatus>('/telegram/notifications', { enabled });
 }
+
+/**
+ * Send weekly summary to Telegram for the authenticated user (on-demand).
+ * Requires that the user has already linked their Telegram account.
+ */
+export async function sendWeeklySummary(): Promise<{ sent: boolean; message?: string }> {
+    return apiClient.post<{ sent: boolean; message?: string }>('/telegram/summary/send');
+}
