@@ -11,15 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.auth.repository import user_repository
-from app.auth.service import auth_service
-
-
-@pytest.fixture
-def client():
-    """Create test client and clear user repository before each test."""
-    user_repository.clear()
-    return TestClient(app)
+# Import test-only singletons from conftest (these use DI overrides)
+from tests.conftest import user_repository, auth_service
 
 
 @pytest.fixture

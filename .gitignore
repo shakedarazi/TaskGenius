@@ -72,6 +72,9 @@ logs/
 tmp/
 temp/
 *.tmp
+cloudflare.md
+
+
 
 # MongoDB data (for local development)
 data/

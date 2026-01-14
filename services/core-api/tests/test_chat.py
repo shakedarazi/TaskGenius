@@ -38,7 +38,7 @@ class TestChatEndpoint:
         mock_client_class.return_value = mock_client
         
         # Get actual user_id from registered user
-        from app.auth.repository import user_repository
+        from tests.conftest import user_repository
         registered_user = user_repository.get_by_username("testuser")
         actual_user_id = registered_user.id if registered_user else "test-user-id"
         
