@@ -236,9 +236,31 @@ class ChatbotService:
 
     def _handle_potential_create(self, request: ChatRequest, is_hebrew: bool = False) -> ChatResponse:
         """Handle potential create task intent - asks for clarification."""
-        # Check if title is mentioned (basic heuristic)
+        # Check conversation history to see what was already asked
+        has_title = False
+        has_priority = False
+        has_deadline_asked = False
+        
+        # Check current message for title
         message_words = request.message.split()
-        has_title = any(len(word) > 3 for word in message_words if word.lower() not in ["create", "add", "new", "task", "צור", "הוסף", "תוסיף", "משימה"])
+        has_title = any(len(word) > 3 for word in message_words if word.lower() not in ["create", "add", "new", "task", "צור", "הוסף", "תוסיף", "משימה", "low", "medium", "high", "urgent", "נמוכה", "בינונית", "גבוהה", "דחופה"])
+        
+        # Check conversation history for collected fields
+        if request.conversation_history:
+            for msg in request.conversation_history[-5:]:  # Check last 5 messages
+                content_lower = msg.get("content", "").lower()
+                role = msg.get("role", "")
+                if role == "user":
+                    # Check if user provided title
+                    if any(len(word) > 3 for word in content_lower.split() if word not in ["create", "add", "new", "task", "צור", "הוסף", "תוסיף", "משימה"]):
+                        has_title = True
+                    # Check if user provided priority
+                    if any(priority_word in content_lower for priority_word in ["low", "medium", "high", "urgent", "נמוכה", "בינונית", "גבוהה", "דחופה"]):
+                        has_priority = True
+                elif role == "assistant":
+                    # Check if we already asked about deadline
+                    if "deadline" in content_lower or "תאריך" in content_lower or "יעד" in content_lower:
+                        has_deadline_asked = True
         
         if is_hebrew:
             if not has_title:
@@ -248,14 +270,24 @@ class ChatbotService:
                     "אני יכול לעזור לך ליצור משימה. מה תרצה להוסיף לרשימה?"
                 ]
                 reply = replies[hash(request.user_id + request.message) % len(replies)]
-            else:
+            elif not has_priority:
                 replies = [
-                    "מעולה! כדי להשלים את היצירה, אני צריך עוד כמה פרטים. מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה) האם יש תאריך יעד?",
-                    "טוב! כדי ליצור את המשימה, אני צריך לדעת: מה העדיפות? האם יש תאריך יעד?",
-                    "נהדר! בוא נשלים את הפרטים: מה העדיפות? האם יש תאריך יעד?"
+                    "מעולה! עכשיו אני צריך לדעת מה העדיפות. מה העדיפות של המשימה? (נמוכה/בינונית/גבוהה/דחופה)",
+                    "טוב! כדי להמשיך, מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה)",
+                    "נהדר! עכשיו אני צריך לדעת מה העדיפות. מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה)"
                 ]
                 reply = replies[hash(request.user_id + request.message) % len(replies)]
-            suggestions = ["הגדר תאריך יעד", "הוסף קטגוריה", "הגדר עדיפות"]
+            elif not has_deadline_asked:
+                replies = [
+                    "מצוין! האם יש תאריך יעד למשימה? (אם לא, פשוט תגיד 'לא' או 'אין')",
+                    "טוב! האם יש תאריך יעד? (אם לא, תגיד 'לא')",
+                    "נהדר! האם יש תאריך יעד למשימה? (אם לא, תגיד 'אין')"
+                ]
+                reply = replies[hash(request.user_id + request.message) % len(replies)]
+            else:
+                # All fields collected, should be ready (but LLM will validate)
+                reply = "מעולה! אני מוכן ליצור את המשימה. האם אתה מוכן?"
+            suggestions = ["הגדר תאריך יעד", "הוסף קטגוריה", "הגדר עדיפות"] if not has_priority else (["הגדר תאריך יעד"] if not has_deadline_asked else [])
         else:
             if not has_title:
                 replies = [
@@ -264,14 +296,24 @@ class ChatbotService:
                     "I can help you create a task. What would you like to add to your list?"
                 ]
                 reply = replies[hash(request.user_id + request.message) % len(replies)]
-            else:
+            elif not has_priority:
                 replies = [
-                    "Great! To complete the creation, I need a few more details. What's the priority? (low/medium/high/urgent) Is there a deadline?",
-                    "Good! To create the task, I need to know: What's the priority? Is there a deadline?",
-                    "Perfect! Let's complete the details: What's the priority? Is there a deadline?"
+                    "Great! Now I need to know the priority. What's the priority? (low/medium/high/urgent)",
+                    "Good! To continue, what's the priority? (low/medium/high/urgent)",
+                    "Perfect! Now I need to know the priority. What's the priority? (low/medium/high/urgent)"
                 ]
                 reply = replies[hash(request.user_id + request.message) % len(replies)]
-            suggestions = ["Set deadline", "Add category", "Set priority"]
+            elif not has_deadline_asked:
+                replies = [
+                    "Excellent! Is there a deadline for this task? (If not, just say 'no' or 'none')",
+                    "Good! Is there a deadline? (If not, say 'no')",
+                    "Perfect! Is there a deadline for this task? (If not, say 'none')"
+                ]
+                reply = replies[hash(request.user_id + request.message) % len(replies)]
+            else:
+                # All fields collected, should be ready (but LLM will validate)
+                reply = "Great! I'm ready to create the task. Are you ready?"
+            suggestions = ["Set deadline", "Add category", "Set priority"] if not has_priority else (["Set deadline"] if not has_deadline_asked else [])
         
         return ChatResponse(
             reply=reply,
@@ -373,12 +415,48 @@ class ChatbotService:
                     ]
                     reply = replies[hash(request.user_id + request.message) % len(replies)]
             else:
-                replies = [
-                    "מעולה! מה תרצה לשנות במשימה? (עדיפות, תאריך יעד, סטטוס, וכו')",
-                    "בוא נעדכן! מה תרצה לשנות? (עדיפות, תאריך יעד, סטטוס)",
-                    "אני יכול לעזור לך לעדכן. מה תרצה לשנות? (עדיפות, תאריך יעד, סטטוס)"
-                ]
-                reply = replies[hash(request.user_id + request.message) % len(replies)]
+                # Task identified, now need title and priority
+                # Check conversation history for collected fields
+                has_title = False
+                has_priority = False
+                has_deadline_asked = False
+                
+                if request.conversation_history:
+                    for msg in request.conversation_history[-5:]:
+                        content_lower = msg.get("content", "").lower()
+                        role = msg.get("role", "")
+                        if role == "user":
+                            if any(len(word) > 3 for word in content_lower.split()):
+                                has_title = True
+                            if any(priority_word in content_lower for priority_word in ["low", "medium", "high", "urgent", "נמוכה", "בינונית", "גבוהה", "דחופה"]):
+                                has_priority = True
+                        elif role == "assistant":
+                            if "תאריך" in content_lower or "יעד" in content_lower:
+                                has_deadline_asked = True
+                
+                if not has_title:
+                    replies = [
+                        "מעולה! מה הכותרת החדשה של המשימה? (או תגיד 'להשאיר' אם לא רוצה לשנות)",
+                        "בוא נעדכן! מה הכותרת? (או 'להשאיר' אם לא רוצה לשנות)",
+                        "אני יכול לעזור לך לעדכן. מה הכותרת החדשה? (או 'להשאיר' אם לא רוצה לשנות)"
+                    ]
+                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                elif not has_priority:
+                    replies = [
+                        "טוב! מה העדיפות החדשה? (נמוכה/בינונית/גבוהה/דחופה)",
+                        "מעולה! מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה)",
+                        "נהדר! מה העדיפות החדשה? (נמוכה/בינונית/גבוהה/דחופה)"
+                    ]
+                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                elif not has_deadline_asked:
+                    replies = [
+                        "מצוין! האם יש תאריך יעד חדש? (אם לא, פשוט תגיד 'לא' או 'אין')",
+                        "טוב! האם יש תאריך יעד? (אם לא, תגיד 'לא')",
+                        "נהדר! האם יש תאריך יעד חדש? (אם לא, תגיד 'אין')"
+                    ]
+                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                else:
+                    reply = "מעולה! אני מוכן לעדכן את המשימה. האם אתה מוכן?"
             suggestions = ["שנה עדיפות", "שנה תאריך יעד", "שנה סטטוס"]
         else:
             if not task_mentioned:
@@ -398,12 +476,48 @@ class ChatbotService:
                     ]
                     reply = replies[hash(request.user_id + request.message) % len(replies)]
             else:
-                replies = [
-                    "Great! What would you like to change about the task? (priority, deadline, status, etc.)",
-                    "Let's update! What would you like to change? (priority, deadline, status)",
-                    "I can help you update. What would you like to change? (priority, deadline, status)"
-                ]
-                reply = replies[hash(request.user_id + request.message) % len(replies)]
+                # Task identified, now need title and priority
+                # Check conversation history for collected fields
+                has_title = False
+                has_priority = False
+                has_deadline_asked = False
+                
+                if request.conversation_history:
+                    for msg in request.conversation_history[-5:]:
+                        content_lower = msg.get("content", "").lower()
+                        role = msg.get("role", "")
+                        if role == "user":
+                            if any(len(word) > 3 for word in content_lower.split()):
+                                has_title = True
+                            if any(priority_word in content_lower for priority_word in ["low", "medium", "high", "urgent"]):
+                                has_priority = True
+                        elif role == "assistant":
+                            if "deadline" in content_lower:
+                                has_deadline_asked = True
+                
+                if not has_title:
+                    replies = [
+                        "Great! What's the new title for the task? (or say 'keep' if you don't want to change it)",
+                        "Let's update! What's the title? (or 'keep' if you don't want to change)",
+                        "I can help you update. What's the new title? (or 'keep' if you don't want to change)"
+                    ]
+                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                elif not has_priority:
+                    replies = [
+                        "Good! What's the new priority? (low/medium/high/urgent)",
+                        "Perfect! What's the priority? (low/medium/high/urgent)",
+                        "Great! What's the new priority? (low/medium/high/urgent)"
+                    ]
+                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                elif not has_deadline_asked:
+                    replies = [
+                        "Excellent! Is there a new deadline? (If not, just say 'no' or 'none')",
+                        "Good! Is there a deadline? (If not, say 'no')",
+                        "Perfect! Is there a new deadline? (If not, say 'none')"
+                    ]
+                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                else:
+                    reply = "Great! I'm ready to update the task. Are you ready?"
             suggestions = ["Change priority", "Change deadline", "Change status"]
         
         return ChatResponse(
@@ -432,28 +546,75 @@ class ChatbotService:
         task_titles = [t.get("title", "").lower() for t in request.tasks]
         task_mentioned = any(title in message_lower for title in task_titles if title)
         
+        # Rule 9: Check for confirmation
+        has_confirmation = False
+        if request.conversation_history:
+            for msg in request.conversation_history[-3:]:
+                content_lower = msg.get("content", "").lower()
+                role = msg.get("role", "")
+                if role == "assistant":
+                    # Check if confirmation was requested
+                    if "אישור" in content_lower or "confirm" in content_lower or "בטוח" in content_lower:
+                        # Next user message should be confirmation
+                        pass
+                elif role == "user":
+                    # Check if user confirmed
+                    confirm_keywords = ["כן", "yes", "אשר", "confirm", "בטוח", "ok", "אוקיי"]
+                    if any(keyword in content_lower for keyword in confirm_keywords):
+                        has_confirmation = True
+        
         if is_hebrew:
             if not task_mentioned:
                 if len(request.tasks) == 1:
-                    reply = f"אני מבין שאתה רוצה למחוק משימה. האם אתה מתכוון ל'{request.tasks[0].get('title', 'המשימה')}'? זה ימחק את המשימה לצמיתות."
+                    task = request.tasks[0]
+                    task_desc = f"משימה: '{task.get('title', 'ללא כותרת')}', עדיפות: {task.get('priority', 'לא צוין')}, תאריך יעד: {task.get('deadline', 'אין')}"
+                    reply = f"אני מבין שאתה רוצה למחוק משימה. האם אתה מתכוון ל'{task.get('title', 'המשימה')}'?\n{task_desc}\nזה ימחק את המשימה לצמיתות."
                 else:
                     reply = f"אני מבין שאתה רוצה למחוק משימה. איזו משימה? יש לך {len(request.tasks)} משימות. אנא ציין את שם המשימה."
                     task_list = ", ".join([t.get("title", "ללא כותרת") for t in request.tasks[:5]])
                     reply += f" המשימות שלך: {task_list}"
+            elif not has_confirmation:
+                # Task identified, present description and ask for confirmation (Rule 9)
+                task = None
+                for t in request.tasks:
+                    if t.get("title", "").lower() in message_lower:
+                        task = t
+                        break
+                if task:
+                    task_desc = f"משימה: '{task.get('title', 'ללא כותרת')}', עדיפות: {task.get('priority', 'לא צוין')}, תאריך יעד: {task.get('deadline', 'אין')}"
+                    reply = f"אני מבין שאתה רוצה למחוק משימה.\n{task_desc}\nזה ימחק את המשימה לצמיתות. האם אתה בטוח? (כן/לא)"
+                else:
+                    reply = "אני מבין שאתה רוצה למחוק משימה. זה ימחק את המשימה לצמיתות. האם אתה בטוח? (כן/לא)"
             else:
-                reply = "אני מבין שאתה רוצה למחוק משימה. זה ימחק את המשימה לצמיתות. האם אתה בטוח?"
-            suggestions = ["אשר מחיקה", "בטל", "ראה את כל המשימות"]
+                # Confirmation received, ready to delete
+                reply = "ממתין למחיקה..."
+            suggestions = ["אשר מחיקה", "בטל", "ראה את כל המשימות"] if not has_confirmation else []
         else:
             if not task_mentioned:
                 if len(request.tasks) == 1:
-                    reply = f"I understand you want to delete a task. Do you mean '{request.tasks[0].get('title', 'the task')}'? This will permanently delete the task."
+                    task = request.tasks[0]
+                    task_desc = f"Task: '{task.get('title', 'Untitled')}', Priority: {task.get('priority', 'Not specified')}, Deadline: {task.get('deadline', 'None')}"
+                    reply = f"I understand you want to delete a task. Do you mean '{task.get('title', 'the task')}'?\n{task_desc}\nThis will permanently delete the task."
                 else:
                     reply = f"I understand you want to delete a task. Which task? You have {len(request.tasks)} tasks. Please specify the task name."
                     task_list = ", ".join([t.get("title", "Untitled") for t in request.tasks[:5]])
                     reply += f" Your tasks: {task_list}"
+            elif not has_confirmation:
+                # Task identified, present description and ask for confirmation (Rule 9)
+                task = None
+                for t in request.tasks:
+                    if t.get("title", "").lower() in message_lower:
+                        task = t
+                        break
+                if task:
+                    task_desc = f"Task: '{task.get('title', 'Untitled')}', Priority: {task.get('priority', 'Not specified')}, Deadline: {task.get('deadline', 'None')}"
+                    reply = f"I understand you want to delete a task.\n{task_desc}\nThis will permanently delete the task. Are you sure? (yes/no)"
+                else:
+                    reply = "I understand you want to delete a task. This will permanently delete the task. Are you sure? (yes/no)"
             else:
-                reply = "I understand you want to delete a task. This will permanently delete the task. Are you sure?"
-            suggestions = ["Confirm deletion", "Cancel", "View all tasks"]
+                # Confirmation received, ready to delete
+                reply = "Waiting for deletion..."
+            suggestions = ["Confirm deletion", "Cancel", "View all tasks"] if not has_confirmation else []
         
         return ChatResponse(
             reply=reply,
@@ -519,6 +680,21 @@ class ChatbotService:
             prompt_parts.append("CONVERSATION HISTORY (IMPORTANT - USE THIS CONTEXT):")
             # Limit to last 10 messages to avoid token limits
             recent_history = request.conversation_history[-10:]
+            
+            # Check if last assistant message was a completion confirmation
+            last_assistant_was_completion = False
+            if recent_history:
+                last_msg = recent_history[-1]
+                if last_msg.get("role") == "assistant":
+                    last_content = last_msg.get("content", "").lower()
+                    # Check for completion indicators
+                    completion_indicators = [
+                        "✅", "הוספתי", "עדכנתי", "מחקתי", "added", "updated", "deleted",
+                        "created", "completed", "done", "finished", "successfully"
+                    ]
+                    if any(indicator in last_content for indicator in completion_indicators):
+                        last_assistant_was_completion = True
+            
             for msg in recent_history:
                 role = msg.get("role", "unknown")
                 content = msg.get("content", "")
@@ -527,17 +703,39 @@ class ChatbotService:
                 elif role == "assistant":
                     prompt_parts.append(f"Assistant: {content}")
             prompt_parts.append("")
-            prompt_parts.append("CRITICAL: The user's current message may be a continuation of the conversation above.")
-            prompt_parts.append("For example, if you asked 'What priority?' and the user responds 'medium', they are answering your question.")
-            prompt_parts.append("Extract information from BOTH the current message AND the conversation history.")
-            prompt_parts.append("")
+            
+            if last_assistant_was_completion:
+                prompt_parts.append("⚠️ CRITICAL: The last assistant message was a COMPLETION CONFIRMATION (task was added/updated/deleted).")
+                prompt_parts.append("This means the previous transaction is FINISHED. The user's current message is likely a NEW request.")
+                prompt_parts.append("DO NOT continue the old transaction. Treat the user's current message as a fresh start.")
+                prompt_parts.append("If the user asks a new question or wants to do something different, respond to the NEW request.")
+                prompt_parts.append("IMPORTANT: When answering questions about tasks, use the CURRENT TASKS LIST above (from database), NOT the conversation history.")
+                prompt_parts.append("The tasks list is always up-to-date and reflects the current state after the completed operation.")
+                prompt_parts.append("Only use the conversation history for general context, NOT to continue the completed transaction or to get task data.")
+                prompt_parts.append("")
+            else:
+                prompt_parts.append("CRITICAL: The user's current message may be a continuation of the conversation above.")
+                prompt_parts.append("For example, if you asked 'What priority?' and the user responds 'medium', they are answering your question.")
+                prompt_parts.append("Extract information from BOTH the current message AND the conversation history.")
+                prompt_parts.append("")
+                prompt_parts.append("IMPORTANT: When answering questions about tasks (e.g., 'what tasks do I have?', 'what's due tomorrow?'),")
+                prompt_parts.append("ALWAYS use the CURRENT TASKS LIST above (from database), NOT the conversation history.")
+                prompt_parts.append("The tasks list is always the most up-to-date source of truth.")
+                prompt_parts.append("")
         
         prompt_parts.append(f"User's CURRENT message: {request.message}")
         prompt_parts.append("")
         
         # Add tasks context
         if request.tasks:
-            prompt_parts.append("User's tasks (REFER TO THESE WHEN RELEVANT):")
+            prompt_parts.append("=" * 50)
+            prompt_parts.append("CURRENT USER TASKS (ALWAYS UP-TO-DATE - USE THIS DATA, NOT HISTORY):")
+            prompt_parts.append("=" * 50)
+            prompt_parts.append("⚠️ CRITICAL: The tasks listed below are ALWAYS the most current data from the database.")
+            prompt_parts.append("If the conversation history mentions tasks that differ from this list, TRUST THIS LIST.")
+            prompt_parts.append("After a task is created/updated/deleted, this list reflects the current state.")
+            prompt_parts.append("When answering questions about tasks, ALWAYS use this list, not the conversation history.")
+            prompt_parts.append("")
             for task in request.tasks[:10]:  # Limit to 10 tasks
                 title = task.get("title", "Untitled")
                 status = task.get("status", "unknown")
@@ -548,7 +746,8 @@ class ChatbotService:
             if len(request.tasks) > 10:
                 prompt_parts.append(f"  ... and {len(request.tasks) - 10} more tasks")
             prompt_parts.append("")
-            prompt_parts.append("IMPORTANT: When the user mentions tasks, refer to them by title. If they mention 'tomorrow', 'urgent', 'high priority', etc., filter the tasks accordingly.")
+            prompt_parts.append("IMPORTANT: When the user mentions tasks, refer to them by title from THIS LIST. If they mention 'tomorrow', 'urgent', 'high priority', etc., filter the tasks from THIS LIST accordingly.")
+            prompt_parts.append("=" * 50)
             prompt_parts.append("")
         else:
             prompt_parts.append("User's tasks: None (user has no tasks yet)")
@@ -584,13 +783,21 @@ class ChatbotService:
         prompt_parts.append("- 'potential_delete' - user wants to delete a task but target is unclear")
         prompt_parts.append("")
         prompt_parts.append("OUTPUT FORMAT (Phase 3 - Structured Output):")
-        prompt_parts.append("You must respond with TWO parts:")
-        prompt_parts.append("1. A natural conversational reply (for the user)")
+        prompt_parts.append("You must respond with TWO SEPARATE parts:")
+        prompt_parts.append("1. A natural conversational reply (for the user) - NO JSON, NO CODE, ONLY NATURAL TEXT")
         prompt_parts.append("2. A JSON command object (for the system)")
         prompt_parts.append("")
-        prompt_parts.append("Format your response as:")
-        prompt_parts.append("REPLY: [your natural conversational response]")
+        prompt_parts.append("Format your response EXACTLY as:")
+        prompt_parts.append("REPLY: [your natural conversational response - ONLY TEXT, NO JSON, NO CODE]")
         prompt_parts.append("COMMAND: [JSON object with command structure]")
+        prompt_parts.append("")
+        prompt_parts.append("CRITICAL OUTPUT RULES:")
+        prompt_parts.append("- The REPLY section MUST contain ONLY natural conversational text")
+        prompt_parts.append("- DO NOT include JSON, code blocks, or any structured data in the REPLY section")
+        prompt_parts.append("- DO NOT repeat the command structure in the REPLY section")
+        prompt_parts.append("- The REPLY is what the user will see - keep it clean and natural")
+        prompt_parts.append("- The COMMAND section is separate and only for the system")
+        prompt_parts.append("- If you include JSON in REPLY, it will confuse the user - NEVER do this")
         prompt_parts.append("")
         prompt_parts.append("COMMAND JSON Structure:")
         prompt_parts.append("{")
@@ -609,12 +816,27 @@ class ChatbotService:
         prompt_parts.append('  "missing_fields": ["field1", "field2"]  // List missing required fields')
         prompt_parts.append("}")
         prompt_parts.append("")
+        prompt_parts.append("DATE/DEADLINE HANDLING RULES:")
+        prompt_parts.append("- When user provides a date/deadline, try to understand it (e.g., 'tomorrow', 'יום רביעי', '20.1', '2024-01-20')")
+        prompt_parts.append("- If you CANNOT clearly understand the date format (e.g., ambiguous relative dates, unclear formats),")
+        prompt_parts.append("  DO NOT guess or use old dates. Instead, ask the user to provide the date in a clear numeric format.")
+        prompt_parts.append("- Example: If user says 'יום רביעי' and you're not sure which Wednesday, ask: 'איזה יום רביעי? אנא תן תאריך במספרים (למשל: 20.1.2024)'")
+        prompt_parts.append("- Example: If user says 'tomorrow' but context is unclear, ask: 'What date is tomorrow? Please provide the date in numbers (e.g., 2024-01-20)'")
+        prompt_parts.append("- NEVER use dates from years ago (e.g., 2023) unless explicitly stated by the user.")
+        prompt_parts.append("- If you cannot parse the date, set deadline to null and ask the user for clarification in numeric format.")
+        prompt_parts.append("")
         prompt_parts.append("RULES FOR COMMAND GENERATION:")
-        prompt_parts.append("- For 'add_task': Set ready=true ONLY if title is provided. confidence>=0.8 only if title is clear.")
-        prompt_parts.append("- For 'update_task'/'delete_task'/'complete_task': Set ready=true ONLY if task is unambiguous. confidence>=0.8 only if task reference is clear.")
+        prompt_parts.append("- For 'add_task': Set ready=true ONLY if BOTH title AND priority are provided. confidence>=0.8 only if both are clear.")
+        prompt_parts.append("  REQUIRED FIELDS for add_task: title (mandatory), priority (mandatory), deadline (optional - ask but can be null)")
+        prompt_parts.append("  WORKFLOW: 1) Ask for title → 2) Ask for priority → 3) Ask for deadline (can skip or ask for numeric format if unclear) → 4) Execute when title+priority are ready")
+        prompt_parts.append("- For 'update_task': Set ready=true ONLY if task is unambiguous AND title AND priority are provided/confirmed.")
+        prompt_parts.append("  REQUIRED FIELDS for update_task: task reference (mandatory), title (mandatory), priority (mandatory), deadline (optional - ask but can be null)")
+        prompt_parts.append("  WORKFLOW: 1) Identify task → 2) Ask for title (or confirm existing) → 3) Ask for priority → 4) Ask for deadline (can skip) → 5) Execute")
+        prompt_parts.append("- For 'delete_task'/'complete_task': Set ready=true ONLY if task is unambiguous. confidence>=0.8 only if task reference is clear.")
         prompt_parts.append("- If information is missing or ambiguous → set ready=false, confidence<0.8, and list missing_fields")
         prompt_parts.append("- Extract fields progressively from the conversation (title, priority, deadline, etc.)")
-        prompt_parts.append("- NEVER set ready=true if required fields are missing")
+        prompt_parts.append("- NEVER set ready=true if required fields (title, priority) are missing")
+        prompt_parts.append("- ALWAYS ask about deadline as the final step before execution (user can say 'no' or 'skip' to set it as null)")
         prompt_parts.append("")
         prompt_parts.append("CONFIDENCE CALCULATION (CRITICAL - MUST BE A NUMBER 0.0-1.0):")
         prompt_parts.append("- confidence MUST be a number between 0.0 and 1.0 (e.g., 0.8, 0.9, 0.5)")
@@ -718,6 +940,103 @@ class ChatbotService:
             logger.error(f"Error calling OpenAI API: {e}", exc_info=True)
             return None
 
+    def _validate_deadline_format(self, deadline: Optional[str]) -> tuple[bool, Optional[str]]:
+        """
+        Validate deadline format (Rule 1, 3).
+        
+        Returns:
+            (is_valid, normalized_iso_string_or_none)
+            - is_valid: True if deadline is either None, explicit "none", or valid ISO date
+            - normalized: ISO date string or None
+        """
+        if not deadline:
+            return (True, None)
+        
+        deadline_lower = deadline.lower().strip()
+        
+        # Check for explicit "none" keywords
+        none_keywords = ["none", "no", "אין", "לא", "null", "skip"]
+        if deadline_lower in none_keywords:
+            return (True, None)
+        
+        # Try to parse as ISO date
+        try:
+            from datetime import datetime
+            # Try ISO format
+            parsed = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            # Return normalized ISO string
+            return (True, parsed.isoformat())
+        except (ValueError, AttributeError):
+            pass
+        
+        # If we can't parse, it's invalid
+        return (False, None)
+    
+    def _is_deadline_ambiguous(self, deadline: Optional[str], conversation_history: Optional[List[Dict[str, str]]] = None) -> bool:
+        """
+        Detect if deadline is ambiguous (Rule 3).
+        
+        Ambiguous examples: "יום רביעי", "tomorrow" without context, "next week"
+        """
+        if not deadline:
+            return False
+        
+        deadline_lower = deadline.lower().strip()
+        
+        # Explicit "none" is not ambiguous
+        none_keywords = ["none", "no", "אין", "לא", "null", "skip"]
+        if deadline_lower in none_keywords:
+            return False
+        
+        # If it's a valid ISO date, it's not ambiguous
+        is_valid, _ = self._validate_deadline_format(deadline)
+        if is_valid and deadline:
+            # Check if it's ISO format (contains dashes and colons)
+            if "-" in deadline and ":" in deadline:
+                return False
+        
+        # Check for ambiguous relative dates (Hebrew and English)
+        ambiguous_patterns = [
+            "יום", "שבוע", "חודש", "שנה",  # Hebrew: day, week, month, year
+            "tomorrow", "yesterday", "today", "next week", "last week",
+            "next month", "last month", "next year", "last year",
+            "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+            "יום ראשון", "יום שני", "יום שלישי", "יום רביעי", "יום חמישי", "יום שישי", "יום שבת"
+        ]
+        
+        for pattern in ambiguous_patterns:
+            if pattern in deadline_lower:
+                # If we have conversation history, check if context was provided
+                if conversation_history:
+                    # Check if user provided numeric date in recent messages
+                    recent_context = " ".join([msg.get("content", "") for msg in conversation_history[-3:]])
+                    # If numeric date found in context, it's less ambiguous
+                    if re.search(r'\d{1,2}[/-]\d{1,2}[/-]\d{2,4}', recent_context):
+                        return False
+                return True
+        
+        # If it's not a clear pattern but also not parseable, it's ambiguous
+        return not is_valid
+    
+    def _was_deadline_asked_last(self, conversation_history: Optional[List[Dict[str, str]]] = None) -> bool:
+        """
+        Check if deadline was asked in the last assistant message (Rule 2).
+        This ensures deadline is the LAST step before CRUD.
+        """
+        if not conversation_history or len(conversation_history) == 0:
+            return False
+        
+        # Check last assistant message
+        last_msg = conversation_history[-1]
+        if last_msg.get("role") != "assistant":
+            return False
+        
+        content_lower = last_msg.get("content", "").lower()
+        
+        # Check if deadline was asked
+        deadline_keywords = ["deadline", "תאריך", "יעד", "date", "due date"]
+        return any(keyword in content_lower for keyword in deadline_keywords)
+    
     def _parse_llm_response(self, content: str, request: ChatRequest) -> tuple[str, Optional[Command]]:
         """
         Parse LLM response to extract reply and command (Phase 3).
@@ -738,9 +1057,23 @@ class ChatbotService:
         
         if reply_match:
             reply = reply_match.group(1).strip()
+            # Clean up: Remove any JSON objects that might have leaked into the reply
+            # This handles cases where LLM includes JSON in the REPLY section
+            json_pattern = r'\{[^{}]*"intent"[^{}]*\}'
+            reply = re.sub(json_pattern, '', reply, flags=re.DOTALL)
+            # Remove any remaining JSON-like structures
+            reply = re.sub(r'\{[^{}]*\}', '', reply, flags=re.DOTALL)
+            # Clean up extra whitespace
+            reply = re.sub(r'\s+', ' ', reply).strip()
         else:
-            # Fallback: use entire content as reply
+            # Fallback: use entire content as reply, but clean it first
             reply = content
+            # Try to remove COMMAND section if it exists
+            reply = re.sub(r'COMMAND:\s*\{.*\}', '', reply, flags=re.DOTALL | re.IGNORECASE)
+            # Remove any JSON objects
+            reply = re.sub(r'\{[^{}]*"intent"[^{}]*\}', '', reply, flags=re.DOTALL)
+            reply = re.sub(r'\{[^{}]*\}', '', reply, flags=re.DOTALL)
+            reply = re.sub(r'\s+', ' ', reply).strip()
         
         if command_match:
             try:
@@ -757,17 +1090,59 @@ class ChatbotService:
                     logger.warning(f"Invalid confidence value: {confidence_raw}, defaulting to 0.0")
                     confidence = 0.0
                 
+                # Validate required fields for add_task and update_task
+                intent = command_dict.get("intent", "clarify")
+                fields = command_dict.get("fields", {})
+                ready = command_dict.get("ready", False)
+                missing_fields = command_dict.get("missing_fields", [])
+                
+                # Enforce required fields: title and priority for add_task/update_task
+                if intent in ["add_task", "update_task"]:
+                    if not fields.get("title"):
+                        ready = False
+                        if "title" not in missing_fields:
+                            missing_fields.append("title")
+                    if not fields.get("priority"):
+                        ready = False
+                        if "priority" not in missing_fields:
+                            missing_fields.append("priority")
+                    
+                    # Rule 2: Deadline must be asked as LAST step
+                    deadline = fields.get("deadline")
+                    if deadline is not None and deadline != "":
+                        # Rule 3: Validate deadline format and clarity
+                        is_valid, normalized = self._validate_deadline_format(deadline)
+                        is_ambiguous = self._is_deadline_ambiguous(deadline, request.conversation_history)
+                        
+                        if not is_valid or is_ambiguous:
+                            # Deadline is unclear - set ready=false and ask for numeric format
+                            ready = False
+                            if "deadline" not in missing_fields:
+                                missing_fields.append("deadline")
+                            # Update fields to None to indicate it needs clarification
+                            fields["deadline"] = None
+                        else:
+                            # Valid and clear - normalize it
+                            fields["deadline"] = normalized
+                    else:
+                        # Rule 2: Check if deadline was asked as last step
+                        if not self._was_deadline_asked_last(request.conversation_history):
+                            # Deadline wasn't asked yet - must be asked before ready
+                            ready = False
+                            if "deadline" not in missing_fields:
+                                missing_fields.append("deadline")
+                
                 # Create Command object
                 command = Command(
-                    intent=command_dict.get("intent", "clarify"),
+                    intent=intent,
                     confidence=confidence,
-                    fields=command_dict.get("fields"),
+                    fields=fields,
                     ref=command_dict.get("ref"),
                     filter=command_dict.get("filter"),
-                    ready=command_dict.get("ready", False),
-                    missing_fields=command_dict.get("missing_fields")
+                    ready=ready,
+                    missing_fields=missing_fields if missing_fields else None
                 )
-                logger.debug(f"Parsed command: intent={command.intent}, confidence={command.confidence}, ready={command.ready}")
+                logger.debug(f"Parsed command: intent={command.intent}, confidence={command.confidence}, ready={command.ready}, missing_fields={command.missing_fields}")
             except (json.JSONDecodeError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to parse command JSON: {e}")
                 # Continue without command - backward compatible

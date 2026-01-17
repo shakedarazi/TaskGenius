@@ -190,6 +190,18 @@ export function TasksPage() {
     }
   }, [viewMode, filters]);
 
+  // Listen for task mutations from ChatWidget (after refreshTasks is defined)
+  useEffect(() => {
+    const handleTaskMutated = async () => {
+      await refreshTasks();
+    };
+    
+    window.addEventListener('taskMutated', handleTaskMutated);
+    return () => {
+      window.removeEventListener('taskMutated', handleTaskMutated);
+    };
+  }, [refreshTasks]);
+
   // Apply UI filters client-side (priority + urgency + search)
   const visibleTasks = useMemo(() => {
     const q = search.trim().toLowerCase();

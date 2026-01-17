@@ -158,6 +158,19 @@ export function ChatWidget({ onTaskCreated }: ChatWidgetProps) {
 
             // Keep only last 50 messages in memory
             setMessages((prev) => prev.slice(-50));
+            
+            // Trigger refresh if a task was created/updated/deleted
+            // Check intent to determine if a task mutation occurred
+            if (response.intent === 'create_task' || response.intent === 'update_task' || response.intent === 'delete_task') {
+                // Rule 4, 5: Clear chat history after CRUD (hard reset)
+                setMessages([]);
+                localStorage.removeItem(CHAT_HISTORY_KEY);
+                
+                // Dispatch custom event to notify TasksPage to refresh
+                window.dispatchEvent(new CustomEvent('taskMutated', { 
+                    detail: { intent: response.intent } 
+                }));
+            }
         } catch (err) {
             const errorMessage: ChatMessage = {
                 id: `error-${Date.now()}`,

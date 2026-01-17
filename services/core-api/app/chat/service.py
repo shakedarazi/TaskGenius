@@ -126,29 +126,43 @@ class ChatService:
                     
                     # Execute add_task if conditions are met
                     if command.intent == "add_task" and command.confidence >= 0.8 and command.ready:
-                        if command.fields and command.fields.get("title"):
+                        if command.fields and command.fields.get("title") and command.fields.get("priority"):
                             # Create task
                             from app.tasks.models import Task
                             from app.tasks.enums import TaskStatus, TaskPriority
                             from datetime import datetime
                             
-                            # Parse priority
-                            priority_str = command.fields.get("priority", "medium")
+                            # Parse priority (required field)
+                            priority_str = command.fields.get("priority", "").lower()
                             priority_map = {
                                 "low": TaskPriority.LOW,
                                 "medium": TaskPriority.MEDIUM,
                                 "high": TaskPriority.HIGH,
                                 "urgent": TaskPriority.URGENT,
+                                "נמוכה": TaskPriority.LOW,
+                                "בינונית": TaskPriority.MEDIUM,
+                                "גבוהה": TaskPriority.HIGH,
+                                "דחופה": TaskPriority.URGENT,
                             }
-                            priority = priority_map.get(priority_str.lower(), TaskPriority.MEDIUM)
+                            priority = priority_map.get(priority_str, TaskPriority.MEDIUM)
                             
-                            # Parse deadline if provided
+                            # Parse deadline if provided (Rule 1, 3: Validate format)
                             deadline = None
-                            if command.fields.get("deadline"):
+                            deadline_value = command.fields.get("deadline")
+                            if deadline_value:
                                 try:
-                                    deadline = datetime.fromisoformat(command.fields["deadline"].replace("Z", "+00:00"))
+                                    # Rule 3: Must be valid ISO format (validated by chatbot-service, but double-check here)
+                                    deadline = datetime.fromisoformat(deadline_value.replace("Z", "+00:00"))
                                 except (ValueError, AttributeError):
-                                    deadline = None
+                                    # Invalid format - reject execution (Rule 3)
+                                    logger.warning(f"Invalid deadline format from chatbot: {deadline_value}")
+                                    is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                                    if is_hebrew:
+                                        chat_response.reply = "❌ שגיאה: תאריך היעד לא תקין. אנא תן תאריך בפורמט מספרי (למשל: 2024-01-20)."
+                                    else:
+                                        chat_response.reply = "❌ Error: Invalid deadline format. Please provide a date in numeric format (e.g., 2024-01-20)."
+                                    chat_response.intent = "error"
+                                    return chat_response
                             
                             # Create task
                             new_task = Task.create(
@@ -171,11 +185,217 @@ class ChatService:
                             chat_response.intent = "create_task"
                             logger.info(f"Created task via chat: {created_task.id} for user {user_id}")
                         else:
-                            # Missing title - should not happen if ready=true, but handle gracefully
-                            logger.warning(f"Command ready but missing title: {command.fields}")
+                            # Missing required fields - should not happen if ready=true, but handle gracefully
+                            missing = []
+                            if not command.fields or not command.fields.get("title"):
+                                missing.append("title")
+                            if not command.fields or not command.fields.get("priority"):
+                                missing.append("priority")
+                            logger.warning(f"Command ready but missing required fields: {missing}. Fields: {command.fields}")
+                            # Update reply to ask for missing fields
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                if "title" in missing:
+                                    chat_response.reply = "אני צריך כותרת למשימה. מה הכותרת?"
+                                elif "priority" in missing:
+                                    chat_response.reply = "אני צריך עדיפות למשימה. מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה)"
+                            else:
+                                if "title" in missing:
+                                    chat_response.reply = "I need a title for the task. What's the title?"
+                                elif "priority" in missing:
+                                    chat_response.reply = "I need a priority for the task. What's the priority? (low/medium/high/urgent)"
                     elif command.intent == "add_task" and command.confidence < 0.8:
                         # Low confidence - don't execute, reply already asks for clarification
                         logger.debug(f"Add task command has low confidence ({command.confidence}), not executing")
+                    
+                    # Rule 8: Execute update_task if conditions are met
+                    elif command.intent == "update_task" and command.confidence >= 0.8 and command.ready:
+                        if not command.ref:
+                            logger.warning("Update task command missing ref (task_id or title)")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא זיהיתי איזו משימה לעדכן. אנא ציין את שם המשימה."
+                            else:
+                                chat_response.reply = "❌ Error: Could not identify which task to update. Please specify the task name."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Find task by ID or title
+                        task_id = command.ref.get("task_id")
+                        task_title = command.ref.get("title")
+                        
+                        if not task_id and not task_title:
+                            logger.warning("Update task command missing both task_id and title in ref")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא זיהיתי איזו משימה לעדכן."
+                            else:
+                                chat_response.reply = "❌ Error: Could not identify which task to update."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Get task
+                        if task_id:
+                            task = await task_repository.get_by_id(task_id, user_id)
+                        else:
+                            # Find by title
+                            tasks = await task_repository.list_by_owner(user_id)
+                            task = None
+                            for t in tasks:
+                                if t.title.lower() == task_title.lower():
+                                    task = t
+                                    break
+                        
+                        if not task:
+                            logger.warning(f"Task not found for update: id={task_id}, title={task_title}")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא מצאתי את המשימה לעדכון."
+                            else:
+                                chat_response.reply = "❌ Error: Task not found for update."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Build updates dict (only non-None fields from command.fields)
+                        updates = {}
+                        if command.fields:
+                            if command.fields.get("title"):
+                                updates["title"] = command.fields["title"]
+                            if command.fields.get("priority"):
+                                priority_str = command.fields.get("priority", "").lower()
+                                priority_map = {
+                                    "low": TaskPriority.LOW,
+                                    "medium": TaskPriority.MEDIUM,
+                                    "high": TaskPriority.HIGH,
+                                    "urgent": TaskPriority.URGENT,
+                                    "נמוכה": TaskPriority.LOW,
+                                    "בינונית": TaskPriority.MEDIUM,
+                                    "גבוהה": TaskPriority.HIGH,
+                                    "דחופה": TaskPriority.URGENT,
+                                }
+                                priority = priority_map.get(priority_str, TaskPriority.MEDIUM)
+                                updates["priority"] = priority.value
+                            
+                            # Parse deadline if provided (Rule 1, 3: Validate format)
+                            deadline_value = command.fields.get("deadline")
+                            if deadline_value:
+                                try:
+                                    deadline = datetime.fromisoformat(deadline_value.replace("Z", "+00:00"))
+                                    updates["deadline"] = deadline
+                                except (ValueError, AttributeError):
+                                    logger.warning(f"Invalid deadline format in update: {deadline_value}")
+                                    is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                                    if is_hebrew:
+                                        chat_response.reply = "❌ שגיאה: תאריך היעד לא תקין. אנא תן תאריך בפורמט מספרי."
+                                    else:
+                                        chat_response.reply = "❌ Error: Invalid deadline format. Please provide a date in numeric format."
+                                    chat_response.intent = "error"
+                                    return chat_response
+                            elif "deadline" in command.fields and command.fields["deadline"] is None:
+                                # Explicit null - clear deadline
+                                updates["deadline"] = None
+                        
+                        if not updates:
+                            logger.warning("Update task command has no fields to update")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא צוינו שדות לעדכון."
+                            else:
+                                chat_response.reply = "❌ Error: No fields specified for update."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Update task
+                        updated_task = await task_repository.update(task.id, user_id, updates)
+                        
+                        if not updated_task:
+                            logger.error(f"Failed to update task {task.id} for user {user_id}")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא הצלחתי לעדכן את המשימה."
+                            else:
+                                chat_response.reply = "❌ Error: Failed to update task."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Update reply to confirm update
+                        is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                        if is_hebrew:
+                            chat_response.reply = f"✅ עדכנתי משימה: '{updated_task.title}'"
+                        else:
+                            chat_response.reply = f"✅ Updated task: '{updated_task.title}'"
+                        chat_response.intent = "update_task"
+                        logger.info(f"Updated task via chat: {updated_task.id} for user {user_id}")
+                    
+                    # Rule 9: Execute delete_task if conditions are met
+                    elif command.intent == "delete_task" and command.confidence >= 0.8 and command.ready:
+                        if not command.ref:
+                            logger.warning("Delete task command missing ref (task_id or title)")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא זיהיתי איזו משימה למחוק."
+                            else:
+                                chat_response.reply = "❌ Error: Could not identify which task to delete."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Find task by ID or title
+                        task_id = command.ref.get("task_id")
+                        task_title = command.ref.get("title")
+                        
+                        if not task_id and not task_title:
+                            logger.warning("Delete task command missing both task_id and title in ref")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא זיהיתי איזו משימה למחוק."
+                            else:
+                                chat_response.reply = "❌ Error: Could not identify which task to delete."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Get task
+                        if task_id:
+                            task = await task_repository.get_by_id(task_id, user_id)
+                        else:
+                            # Find by title
+                            tasks = await task_repository.list_by_owner(user_id)
+                            task = None
+                            for t in tasks:
+                                if t.title.lower() == task_title.lower():
+                                    task = t
+                                    break
+                        
+                        if not task:
+                            logger.warning(f"Task not found for delete: id={task_id}, title={task_title}")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא מצאתי את המשימה למחיקה."
+                            else:
+                                chat_response.reply = "❌ Error: Task not found for deletion."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Delete task
+                        deleted = await task_repository.delete(task.id, user_id)
+                        
+                        if not deleted:
+                            logger.error(f"Failed to delete task {task.id} for user {user_id}")
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = "❌ שגיאה: לא הצלחתי למחוק את המשימה."
+                            else:
+                                chat_response.reply = "❌ Error: Failed to delete task."
+                            chat_response.intent = "error"
+                            return chat_response
+                        
+                        # Update reply to confirm deletion
+                        is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                        if is_hebrew:
+                            chat_response.reply = f"✅ מחקתי משימה: '{task.title}'"
+                        else:
+                            chat_response.reply = f"✅ Deleted task: '{task.title}'"
+                        chat_response.intent = "delete_task"
+                        logger.info(f"Deleted task via chat: {task.id} for user {user_id}")
                 
                 return chat_response
             except httpx.HTTPError as e:
