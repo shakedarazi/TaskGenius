@@ -6,8 +6,10 @@ This is a read-only facade - no mutations or DB access.
 """
 
 import logging
+import json
+import re
 from typing import Optional, Dict, Any, List
-from app.schemas import ChatRequest, ChatResponse
+from app.schemas import ChatRequest, ChatResponse, Command
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -508,10 +510,30 @@ class ChatbotService:
             "- Refer to specific tasks when relevant (use task titles, deadlines, priorities)",
             "- Be aware of task context: deadlines, priorities, statuses",
             "- NEVER assume or guess - always ask if unclear",
+            "- REMEMBER previous conversation context - users may continue previous requests",
             "",
-            f"User's message: {request.message}",
-            ""
         ]
+        
+        # Add conversation history if available
+        if request.conversation_history:
+            prompt_parts.append("CONVERSATION HISTORY (IMPORTANT - USE THIS CONTEXT):")
+            # Limit to last 10 messages to avoid token limits
+            recent_history = request.conversation_history[-10:]
+            for msg in recent_history:
+                role = msg.get("role", "unknown")
+                content = msg.get("content", "")
+                if role == "user":
+                    prompt_parts.append(f"User: {content}")
+                elif role == "assistant":
+                    prompt_parts.append(f"Assistant: {content}")
+            prompt_parts.append("")
+            prompt_parts.append("CRITICAL: The user's current message may be a continuation of the conversation above.")
+            prompt_parts.append("For example, if you asked 'What priority?' and the user responds 'medium', they are answering your question.")
+            prompt_parts.append("Extract information from BOTH the current message AND the conversation history.")
+            prompt_parts.append("")
+        
+        prompt_parts.append(f"User's CURRENT message: {request.message}")
+        prompt_parts.append("")
         
         # Add tasks context
         if request.tasks:
@@ -560,6 +582,49 @@ class ChatbotService:
         prompt_parts.append("- 'potential_create' - user wants to create a task but information is incomplete")
         prompt_parts.append("- 'potential_update' - user wants to update a task but target is unclear")
         prompt_parts.append("- 'potential_delete' - user wants to delete a task but target is unclear")
+        prompt_parts.append("")
+        prompt_parts.append("OUTPUT FORMAT (Phase 3 - Structured Output):")
+        prompt_parts.append("You must respond with TWO parts:")
+        prompt_parts.append("1. A natural conversational reply (for the user)")
+        prompt_parts.append("2. A JSON command object (for the system)")
+        prompt_parts.append("")
+        prompt_parts.append("Format your response as:")
+        prompt_parts.append("REPLY: [your natural conversational response]")
+        prompt_parts.append("COMMAND: [JSON object with command structure]")
+        prompt_parts.append("")
+        prompt_parts.append("COMMAND JSON Structure:")
+        prompt_parts.append("{")
+        prompt_parts.append('  "intent": "add_task|update_task|delete_task|complete_task|list_tasks|clarify",')
+        prompt_parts.append('  "confidence": 0.0-1.0,  // High (>=0.8) only when all required fields are clear')
+        prompt_parts.append('  "fields": {  // For add_task: title, priority, deadline, etc.')
+        prompt_parts.append('    "title": "string or null",')
+        prompt_parts.append('    "priority": "low|medium|high|urgent or null",')
+        prompt_parts.append('    "deadline": "ISO date string or null"')
+        prompt_parts.append('  },')
+        prompt_parts.append('  "ref": {  // For update/delete/complete: task reference')
+        prompt_parts.append('    "task_id": "string or null",')
+        prompt_parts.append('    "title": "string or null"  // For matching')
+        prompt_parts.append('  },')
+        prompt_parts.append('  "ready": true/false,  // true only when all required fields are present')
+        prompt_parts.append('  "missing_fields": ["field1", "field2"]  // List missing required fields')
+        prompt_parts.append("}")
+        prompt_parts.append("")
+        prompt_parts.append("RULES FOR COMMAND GENERATION:")
+        prompt_parts.append("- For 'add_task': Set ready=true ONLY if title is provided. confidence>=0.8 only if title is clear.")
+        prompt_parts.append("- For 'update_task'/'delete_task'/'complete_task': Set ready=true ONLY if task is unambiguous. confidence>=0.8 only if task reference is clear.")
+        prompt_parts.append("- If information is missing or ambiguous → set ready=false, confidence<0.8, and list missing_fields")
+        prompt_parts.append("- Extract fields progressively from the conversation (title, priority, deadline, etc.)")
+        prompt_parts.append("- NEVER set ready=true if required fields are missing")
+        prompt_parts.append("")
+        prompt_parts.append("CONFIDENCE CALCULATION (CRITICAL - MUST BE A NUMBER 0.0-1.0):")
+        prompt_parts.append("- confidence MUST be a number between 0.0 and 1.0 (e.g., 0.8, 0.9, 0.5)")
+        prompt_parts.append("- DO NOT use strings like 'A A' or 'high' - ONLY use numbers")
+        prompt_parts.append("- High confidence (>=0.8): All required information is clear and unambiguous")
+        prompt_parts.append("- Medium confidence (0.5-0.7): Some information is present but incomplete or ambiguous")
+        prompt_parts.append("- Low confidence (<0.5): Information is missing or very unclear")
+        prompt_parts.append("- Example: If user says 'add task buy milk' → confidence=0.9 (title is clear)")
+        prompt_parts.append("- Example: If user says 'add task' → confidence=0.3 (title is missing)")
+        prompt_parts.append("- Example: If user says 'medium' after you asked 'what priority?' → confidence=0.8 (answering your question)")
         prompt_parts.append("")
         prompt_parts.append("Generate a helpful, conversational response. Be concise and friendly.")
         prompt_parts.append("Respond naturally as if you're helping the user manage their tasks.")
@@ -621,11 +686,18 @@ class ChatbotService:
                 timeout=settings.LLM_TIMEOUT,
             )
             
-            # Extract reply from response
-            reply = response.choices[0].message.content.strip()
+            # Extract reply and command from response
+            content = response.choices[0].message.content.strip()
+            
+            if not content:
+                logger.warning("Empty reply from LLM")
+                return None
+            
+            # Parse structured output (Phase 3)
+            reply, command = self._parse_llm_response(content, request)
             
             if not reply:
-                logger.warning("Empty reply from LLM")
+                logger.warning("Could not extract reply from LLM response")
                 return None
             
             # Determine intent from original message (more reliable than extracting from reply)
@@ -638,12 +710,69 @@ class ChatbotService:
             return ChatResponse(
                 reply=reply,
                 intent=intent,
-                suggestions=suggestions
+                suggestions=suggestions,
+                command=command
             )
             
         except Exception as e:
             logger.error(f"Error calling OpenAI API: {e}", exc_info=True)
             return None
+
+    def _parse_llm_response(self, content: str, request: ChatRequest) -> tuple[str, Optional[Command]]:
+        """
+        Parse LLM response to extract reply and command (Phase 3).
+        
+        Expected format:
+        REPLY: [natural text]
+        COMMAND: [JSON object]
+        
+        Returns:
+            (reply, command) tuple
+        """
+        reply = ""
+        command = None
+        
+        # Try to parse structured format
+        reply_match = re.search(r'REPLY:\s*(.+?)(?=COMMAND:|$)', content, re.DOTALL | re.IGNORECASE)
+        command_match = re.search(r'COMMAND:\s*(\{.*\})', content, re.DOTALL | re.IGNORECASE)
+        
+        if reply_match:
+            reply = reply_match.group(1).strip()
+        else:
+            # Fallback: use entire content as reply
+            reply = content
+        
+        if command_match:
+            try:
+                command_json = command_match.group(1).strip()
+                command_dict = json.loads(command_json)
+                
+                # Validate and parse confidence (must be a number between 0.0 and 1.0)
+                confidence_raw = command_dict.get("confidence", 0.0)
+                try:
+                    confidence = float(confidence_raw)
+                    # Clamp to valid range
+                    confidence = max(0.0, min(1.0, confidence))
+                except (ValueError, TypeError):
+                    logger.warning(f"Invalid confidence value: {confidence_raw}, defaulting to 0.0")
+                    confidence = 0.0
+                
+                # Create Command object
+                command = Command(
+                    intent=command_dict.get("intent", "clarify"),
+                    confidence=confidence,
+                    fields=command_dict.get("fields"),
+                    ref=command_dict.get("ref"),
+                    filter=command_dict.get("filter"),
+                    ready=command_dict.get("ready", False),
+                    missing_fields=command_dict.get("missing_fields")
+                )
+                logger.debug(f"Parsed command: intent={command.intent}, confidence={command.confidence}, ready={command.ready}")
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                logger.warning(f"Failed to parse command JSON: {e}")
+                # Continue without command - backward compatible
+        
+        return reply, command
 
     def _extract_intent_from_message(self, message: str, request: ChatRequest) -> Optional[str]:
         """

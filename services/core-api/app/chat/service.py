@@ -9,8 +9,9 @@ This service:
 - Never mutates state during chat flow
 """
 
+import logging
 import httpx
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.config import settings
@@ -18,6 +19,8 @@ from app.tasks.repository import TaskRepositoryInterface
 from app.tasks.schemas import TaskResponse
 from app.insights.service import InsightsService
 from app.chat.schemas import ChatResponse
+
+logger = logging.getLogger(__name__)
 
 
 class ChatService:
@@ -41,6 +44,7 @@ class ChatService:
         user_id: str,
         message: str,
         task_repository: TaskRepositoryInterface,
+        conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> ChatResponse:
         """
         Process a chat message by:
@@ -91,6 +95,10 @@ class ChatService:
             "weekly_summary": weekly_summary_data,
         }
         
+        # Add conversation history if provided
+        if conversation_history:
+            chatbot_request["conversation_history"] = conversation_history
+        
         # Call chatbot-service
         async with httpx.AsyncClient() as client:
             try:
@@ -102,11 +110,74 @@ class ChatService:
                 response.raise_for_status()
                 chatbot_response = response.json()  # httpx response.json() is synchronous
                 
-                return ChatResponse(
+                # Build ChatResponse with command (Phase 3/4)
+                chat_response = ChatResponse(
                     reply=chatbot_response["reply"],
                     intent=chatbot_response.get("intent"),
                     suggestions=chatbot_response.get("suggestions"),
                 )
+                
+                # Phase 4: Execute add_task if command is present and ready
+                if chatbot_response.get("command"):
+                    from app.chat.schemas import Command
+                    command_dict = chatbot_response["command"]
+                    command = Command(**command_dict)
+                    chat_response.command = command
+                    
+                    # Execute add_task if conditions are met
+                    if command.intent == "add_task" and command.confidence >= 0.8 and command.ready:
+                        if command.fields and command.fields.get("title"):
+                            # Create task
+                            from app.tasks.models import Task
+                            from app.tasks.enums import TaskStatus, TaskPriority
+                            from datetime import datetime
+                            
+                            # Parse priority
+                            priority_str = command.fields.get("priority", "medium")
+                            priority_map = {
+                                "low": TaskPriority.LOW,
+                                "medium": TaskPriority.MEDIUM,
+                                "high": TaskPriority.HIGH,
+                                "urgent": TaskPriority.URGENT,
+                            }
+                            priority = priority_map.get(priority_str.lower(), TaskPriority.MEDIUM)
+                            
+                            # Parse deadline if provided
+                            deadline = None
+                            if command.fields.get("deadline"):
+                                try:
+                                    deadline = datetime.fromisoformat(command.fields["deadline"].replace("Z", "+00:00"))
+                                except (ValueError, AttributeError):
+                                    deadline = None
+                            
+                            # Create task
+                            new_task = Task.create(
+                                owner_id=user_id,
+                                title=command.fields["title"],
+                                status=TaskStatus.OPEN,
+                                priority=priority,
+                                deadline=deadline,
+                            )
+                            
+                            # Save to database
+                            created_task = await task_repository.create(new_task)
+                            
+                            # Update reply to confirm creation
+                            is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                            if is_hebrew:
+                                chat_response.reply = f"✅ הוספתי משימה: '{created_task.title}'"
+                            else:
+                                chat_response.reply = f"✅ Added task: '{created_task.title}'"
+                            chat_response.intent = "create_task"
+                            logger.info(f"Created task via chat: {created_task.id} for user {user_id}")
+                        else:
+                            # Missing title - should not happen if ready=true, but handle gracefully
+                            logger.warning(f"Command ready but missing title: {command.fields}")
+                    elif command.intent == "add_task" and command.confidence < 0.8:
+                        # Low confidence - don't execute, reply already asks for clarification
+                        logger.debug(f"Add task command has low confidence ({command.confidence}), not executing")
+                
+                return chat_response
             except httpx.HTTPError as e:
                 # Fallback response if chatbot-service is unavailable
                 return ChatResponse(

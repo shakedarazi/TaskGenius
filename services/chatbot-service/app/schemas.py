@@ -32,6 +32,10 @@ class ChatRequest(BaseModel):
         default=None,
         description="Weekly insights summary (if requested)"
     )
+    conversation_history: Optional[List[Dict[str, str]]] = Field(
+        default=None,
+        description="Previous conversation messages for context (list of {role: 'user'|'assistant', content: '...'})"
+    )
     
     @field_validator("message")
     @classmethod
@@ -50,6 +54,21 @@ class ChatRequest(BaseModel):
         return v.strip()
 
 
+class Command(BaseModel):
+    """
+    Structured command from chatbot (optional).
+    
+    Phase 3: Structured output for machine-readable actions.
+    """
+    intent: str = Field(description="Command intent: add_task|update_task|delete_task|complete_task|list_tasks|clarify")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence score (0.0-1.0)")
+    fields: Optional[Dict[str, Any]] = Field(default=None, description="Extracted fields for add_task (title, priority, deadline, etc.)")
+    ref: Optional[Dict[str, Any]] = Field(default=None, description="Task reference for update/delete/complete")
+    filter: Optional[Dict[str, Any]] = Field(default=None, description="Filter for list_tasks")
+    ready: bool = Field(default=False, description="Whether all required fields are collected and command is ready to execute")
+    missing_fields: Optional[List[str]] = Field(default=None, description="List of required fields that are still missing")
+
+
 class ChatResponse(BaseModel):
     """
     Response from chatbot-service to core-api.
@@ -65,4 +84,8 @@ class ChatResponse(BaseModel):
     suggestions: Optional[List[str]] = Field(
         default=None,
         description="Suggested actions or follow-ups"
+    )
+    command: Optional[Command] = Field(
+        default=None,
+        description="Structured command (optional, backward compatible)"
     )

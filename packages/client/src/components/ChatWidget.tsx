@@ -133,7 +133,17 @@ export function ChatWidget({ onTaskCreated }: ChatWidgetProps) {
         setLoading(true);
 
         try {
-            const response = await chatApi.sendMessage({ message: currentInput });
+            // Prepare conversation history (last 10 messages, excluding current)
+            // Format: [{role: 'user'|'assistant', content: '...'}]
+            const historyForApi = messages.slice(-10).map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }));
+            
+            const response = await chatApi.sendMessage({ 
+                message: currentInput,
+                conversation_history: historyForApi
+            });
             
             const assistantMessage: ChatMessage = {
                 id: `assistant-${Date.now()}`,

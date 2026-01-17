@@ -50,4 +50,5 @@ async def chat(
         user_id=current_user.id,
         message=request.message,
         task_repository=task_repository,
+        conversation_history=request.conversation_history,
     )

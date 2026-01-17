@@ -50,6 +50,8 @@ export interface ChatRequest {
     message: string;
     /** Optional context from previous messages */
     context?: string;
+    /** Conversation history for context (list of {role: 'user'|'assistant', content: '...'}) */
+    conversation_history?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
 /**
