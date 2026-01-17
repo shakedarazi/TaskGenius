@@ -52,7 +52,7 @@ class TestChatbotService:
         assert "summary" in response.reply.lower()
 
     async def test_create_task_intent(self, service):
-        """Service should handle create task intent."""
+        """Service should handle potential create task intent (Phase 2)."""
         request = ChatRequest(
             message="create a new task",
             user_id="test-user",
@@ -60,7 +60,8 @@ class TestChatbotService:
         response = await service.generate_response(request)
         
         assert response.reply
-        assert response.intent == "create_task"
+        # Phase 2: Returns potential_create (needs clarification)
+        assert response.intent == "potential_create"
 
     async def test_help_intent(self, service):
         """Service should handle help intent."""
@@ -320,3 +321,85 @@ class TestLLMIntegration:
         assert "Task 2" in prompt
         assert "Completed: 1" in prompt
         assert "High priority: 1" in prompt
+
+
+class TestPhase2IntentQuality:
+    """Tests for Phase 2: Intent Quality & Task-Aware Reasoning."""
+
+    @pytest.fixture
+    def service(self):
+        """Create service instance."""
+        return ChatbotService()
+
+    async def test_potential_create_asks_for_title(self, service):
+        """Service should ask for title when create intent is incomplete."""
+        request = ChatRequest(
+            message="add task",
+            user_id="test-user",
+        )
+        response = await service.generate_response(request)
+        
+        assert response.reply
+        assert response.intent == "potential_create"
+        assert "title" in response.reply.lower() or "כותרת" in response.reply
+
+    async def test_potential_update_asks_for_task(self, service):
+        """Service should ask which task to update when ambiguous."""
+        request = ChatRequest(
+            message="update task",
+            user_id="test-user",
+            tasks=[
+                {"id": "1", "title": "Task 1", "status": "open", "priority": "high"},
+                {"id": "2", "title": "Task 2", "status": "open", "priority": "medium"},
+            ],
+        )
+        response = await service.generate_response(request)
+        
+        assert response.reply
+        assert response.intent == "potential_update"
+        assert "which" in response.reply.lower() or "איזו" in response.reply or "איזה" in response.reply
+
+    async def test_potential_delete_asks_for_confirmation(self, service):
+        """Service should ask for confirmation when delete intent is detected."""
+        request = ChatRequest(
+            message="delete task",
+            user_id="test-user",
+            tasks=[
+                {"id": "1", "title": "Task 1", "status": "open", "priority": "high"},
+            ],
+        )
+        response = await service.generate_response(request)
+        
+        assert response.reply
+        assert response.intent == "potential_delete"
+        # Check for confirmation-related words (delete, permanently, sure, confirm, etc.)
+        reply_lower = response.reply.lower()
+        assert any(word in reply_lower for word in ["delete", "permanently", "sure", "confirm", "בטוח", "מחיקה"])
+
+    async def test_task_insights_analyzes_tasks(self, service):
+        """Service should provide insights about tasks (deadlines, priorities)."""
+        request = ChatRequest(
+            message="what's urgent for me?",
+            user_id="test-user",
+            tasks=[
+                {"id": "1", "title": "Urgent Task", "status": "open", "priority": "high"},
+                {"id": "2", "title": "Normal Task", "status": "open", "priority": "low"},
+            ],
+        )
+        response = await service.generate_response(request)
+        
+        assert response.reply
+        assert response.intent == "task_insights"
+        assert "urgent" in response.reply.lower() or "דחוף" in response.reply or "priority" in response.reply.lower()
+
+    async def test_task_insights_with_no_tasks(self, service):
+        """Service should handle task insights request when no tasks exist."""
+        request = ChatRequest(
+            message="what's urgent?",
+            user_id="test-user",
+            tasks=[],
+        )
+        response = await service.generate_response(request)
+        
+        assert response.reply
+        assert response.intent == "task_insights"
