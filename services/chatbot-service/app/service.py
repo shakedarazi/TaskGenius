@@ -652,27 +652,62 @@ class ChatbotService:
         """
         message_lower = message.lower()
         
+        # Check for phrases first (more specific), then single words
+        # Hebrew phrases for create
+        create_phrases_hebrew = ["רוצה להוסיף", "רוצה ליצור", "אני רוצה להוסיף", "אני רוצה ליצור", "בוא נוסיף", "בוא ניצור"]
+        # Hebrew phrases for update
+        update_phrases_hebrew = ["רוצה לעדכן", "רוצה לשנות", "אני רוצה לעדכן", "אני רוצה לשנות", "בוא נעדכן", "בוא נשנה"]
+        # Hebrew phrases for delete
+        delete_phrases_hebrew = ["רוצה למחוק", "רוצה להסיר", "אני רוצה למחוק", "אני רוצה להסיר", "בוא נמחק", "בוא נסיר"]
+        
         # Check for task insights (deadlines, priorities, urgency) - highest priority
         if any(word in message_lower for word in ["summary", "insights", "report", "weekly", "סיכום", "דוח"]):
             return "get_insights"
         elif any(word in message_lower for word in ["urgent", "priority", "deadline", "due", "דחוף", "עדיפות", "תאריך"]):
             return "task_insights"
         
-        # Check for update/delete/complete intents BEFORE create (more specific)
-        elif any(word in message_lower for word in ["update", "change", "modify", "edit", "עדכן", "שנה", "ערוך", "עדכן"]):
+        # Check for create/update/delete intents FIRST (before list_tasks)
+        # These are action verbs - more specific than "list" or "show"
+        # Check phrases first (more specific), then single words
+        
+        # CREATE - check phrases first
+        if any(phrase in message_lower for phrase in create_phrases_hebrew):
+            return "potential_create"
+        # CREATE - check single words
+        elif any(word in message_lower for word in ["create", "add", "new", "צור", "הוסף", "תוסיף"]):
+            return "potential_create"
+        
+        # UPDATE - check phrases first
+        elif any(phrase in message_lower for phrase in update_phrases_hebrew):
             return "potential_update"
-        elif any(word in message_lower for word in ["delete", "remove", "מחק", "הסר"]):
-            return "potential_delete"
+        # UPDATE - check single words
+        elif any(word in message_lower for word in ["update", "change", "modify", "edit", "עדכן", "שנה", "ערוך"]):
+            return "potential_update"
         elif any(word in message_lower for word in ["complete", "done", "finish", "בוצע", "סיים", "סיימתי"]):
             return "potential_update"
         
-        # Check for list tasks
-        elif any(word in message_lower for word in ["list", "show", "tasks", "what", "רשימה", "הצג", "מה"]):
-            return "list_tasks"
+        # DELETE - check phrases first
+        elif any(phrase in message_lower for phrase in delete_phrases_hebrew):
+            return "potential_delete"
+        # DELETE - check single words
+        elif any(word in message_lower for word in ["delete", "remove", "מחק", "הסר"]):
+            return "potential_delete"
         
-        # Check for create intent (potential - needs clarification) - last, as "task" is common
-        elif any(word in message_lower for word in ["create", "add", "new", "צור", "הוסף", "תוסיף", "רוצה להוסיף", "רוצה ליצור"]):
-            return "potential_create"
+        # Check for list tasks (after action verbs)
+        # Only match if it's clearly a list query, not an action
+        # Exclude "מה" if there are action verbs (create/update/delete)
+        action_verbs = ["create", "add", "update", "delete", "remove", "צור", "הוסף", "עדכן", "מחק", "להוסיף", "ליצור", "לעדכן", "למחוק", "להסיר"]
+        has_action_verb = any(verb in message_lower for verb in action_verbs)
+        
+        if any(word in message_lower for word in ["list", "show", "tasks", "רשימה", "הצג"]):
+            # Clear list commands
+            return "list_tasks"
+        elif "מה" in message_lower and not has_action_verb:
+            # "מה" only if no action verbs (e.g., "מה המשימות שלי?" not "מה המשימה שתרצה להוסיף?")
+            return "list_tasks"
+        elif "what" in message_lower and not has_action_verb:
+            # "what" only if no action verbs
+            return "list_tasks"
         
         return "unknown"
 
