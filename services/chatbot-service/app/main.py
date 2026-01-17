@@ -8,9 +8,19 @@ IMPORTANT: This service must NEVER access MongoDB directly.
 All data operations must go through core-api.
 """
 
+import logging
 from fastapi import FastAPI
 
 from app.config import settings
+
+# Configure logging
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title=settings.APP_NAME,

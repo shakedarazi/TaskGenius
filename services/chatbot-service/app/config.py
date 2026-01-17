@@ -5,6 +5,7 @@ This module handles application configuration via environment variables.
 """
 
 import os
+from typing import Optional
 
 
 class Settings:
@@ -22,9 +23,11 @@ class Settings:
     # Core API (for callbacks if needed)
     CORE_API_URL: str = os.getenv("CORE_API_URL", "http://core-api:8000")
 
-    # AI/LLM Configuration (placeholder for future phases)
-    # OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    # MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-4")
+    # AI/LLM Configuration (Phase 1)
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", None)
+    MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-4o-mini")
+    USE_LLM: bool = os.getenv("USE_LLM", "false").lower() == "true"
+    LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "10.0"))
 
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

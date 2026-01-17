@@ -56,6 +56,11 @@ services:
       - DEBUG=false
       - CORE_API_URL=http://core-api:8000
       - LOG_LEVEL=INFO
+      # LLM Configuration (Phase 1)
+      - USE_LLM=${USE_LLM:-false}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MODEL_NAME=${MODEL_NAME:-gpt-4o-mini}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-10.0}
     networks:
       - taskgenius-network
     restart: unless-stopped

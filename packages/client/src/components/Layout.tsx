@@ -13,6 +13,7 @@
 import type { ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { isAuthenticated, clearToken } from '@/api/client';
+import { ChatWidget } from '@/components/ChatWidget';
 
 interface LayoutProps {
     children: ReactNode;
@@ -63,6 +64,8 @@ export function Layout({ children }: LayoutProps) {
                     <p>&copy; {new Date().getFullYear()} TASKGENIUS</p>
                 </div>
             </footer>
+
+            {authenticated && <ChatWidget />}
         </div>
     );
 }

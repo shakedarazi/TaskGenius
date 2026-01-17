@@ -39,6 +39,8 @@ export function setToken(token: string): void {
  */
 export function clearToken(): void {
     localStorage.removeItem(TOKEN_KEY);
+    // Also clear chat history on logout
+    localStorage.removeItem('taskgenius_chat_history');
 }
 
 /**

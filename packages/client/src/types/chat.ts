@@ -56,9 +56,9 @@ export interface ChatRequest {
  * Chat response from core-api
  */
 export interface ChatResponse {
-    message: ChatMessage;
-    /** Any tasks that were affected */
-    affectedTasks?: string[];
+    reply: string;
+    intent?: string;
+    suggestions?: string[];
 }
 
 /**
