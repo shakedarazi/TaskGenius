@@ -301,6 +301,159 @@ body.modal-open {
   overflow: hidden;
 }
 
+/* Settings Page Animations */
+.settings-page {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.verification-code-box {
+  animation: slideDown 0.4s ease-out;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Telegram Icon Animation */
+.settings-section svg {
+  transition: transform 0.3s ease;
+}
+
+.settings-section:hover svg {
+  transform: scale(1.1) rotate(5deg);
+}
+
+/* Code Display Hover Effect */
+.code-display {
+  transition: all 0.3s ease;
+  cursor: pointer;
+  user-select: all;
+}
+
+.code-display:hover {
+  background-color: var(--theme-light-blue-light) !important;
+  transform: scale(1.02);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Form Switch Transition */
+.form-check-input {
+  transition: all 0.3s ease;
+}
+
+.form-check-input:checked {
+  background-color: var(--theme-success);
+  border-color: var(--theme-success);
+}
+
+/* Auth Pages (Login/Register) */
+.auth-page {
+  min-height: 100vh;
+  background: linear-gradient(135deg, var(--theme-background) 0%, #e0e8f0 100%);
+  animation: fadeIn 0.5s ease-out;
+}
+
+.auth-page .card {
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.auth-page .card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 15px 35px rgba(0, 0, 0, 0.15) !important;
+}
+
+.auth-page .card-header {
+  background: linear-gradient(135deg, var(--theme-navy-primary) 0%, var(--theme-navy-dark) 100%);
+}
+
+.auth-page .form-control {
+  transition: all 0.3s ease;
+  border: 2px solid #e2e8f0;
+}
+
+.auth-page .form-control:focus {
+  border-color: var(--theme-light-blue);
+  box-shadow: 0 0 0 0.2rem rgba(74, 144, 226, 0.25);
+  transform: translateY(-2px);
+}
+
+.auth-page .btn-primary {
+  background: linear-gradient(135deg, var(--theme-navy-primary) 0%, var(--theme-light-blue) 100%);
+  border: none;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.auth-page .btn-primary:hover {
+  background: linear-gradient(135deg, var(--theme-navy-dark) 0%, var(--theme-navy-primary) 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(26, 54, 93, 0.3);
+}
+
+.auth-page .btn-primary:active {
+  transform: translateY(0);
+}
+
+.auth-page .text-primary {
+  color: var(--theme-light-blue) !important;
+  transition: color 0.2s ease;
+}
+
+.auth-page .text-primary:hover {
+  color: var(--theme-navy-primary) !important;
+}
+
+.auth-page a.text-primary:hover {
+  text-decoration: underline !important;
+}
+
+/* Auth page icons animation */
+.auth-page .card-header i {
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+/* Input focus animations */
+.auth-page .form-control:focus {
+  border-color: var(--theme-light-blue);
+}
+
+.auth-page .form-label {
+  color: var(--theme-text);
+  margin-bottom: 0.5rem;
+}
+
+.auth-page .form-label i {
+  transition: transform 0.2s ease;
+}
+
+.auth-page .form-control:focus ~ .form-label i,
+.auth-page .form-control:not(:placeholder-shown) ~ .form-label i {
+  transform: scale(1.1);
+}
+
 /* Focus States for Accessibility */
 .btn:focus-visible,
 .form-control:focus-visible,

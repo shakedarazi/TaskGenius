@@ -20,6 +20,8 @@ export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) 
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
+  const [deletingTaskTitle, setDeletingTaskTitle] = useState<string>('');
 
   // Find the task being edited
   useEffect(() => {
@@ -33,7 +35,7 @@ export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) 
 
   // Prevent body scroll when modal is open
   useEffect(() => {
-    if (editingTask) {
+    if (editingTask || deletingTaskId) {
       document.body.classList.add('modal-open');
     } else {
       document.body.classList.remove('modal-open');
@@ -41,7 +43,7 @@ export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) 
     return () => {
       document.body.classList.remove('modal-open');
     };
-  }, [editingTask]);
+  }, [editingTask, deletingTaskId]);
 
   const handleToggleComplete = async (task: Task) => {
     setActionLoading(task.id);
@@ -59,18 +61,30 @@ export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) 
     }
   };
 
-  const handleDelete = async (taskId: string) => {
-    if (!confirm('Are you sure you want to delete this task?')) return;
+  const handleDeleteClick = (task: Task) => {
+    setDeletingTaskId(task.id);
+    setDeletingTaskTitle(task.title);
+  };
 
-    setActionLoading(taskId);
+  const handleDeleteConfirm = async () => {
+    if (!deletingTaskId) return;
+
+    setActionLoading(deletingTaskId);
     try {
-      await tasksApi.deleteTask(taskId);
-      onDelete(taskId);
+      await tasksApi.deleteTask(deletingTaskId);
+      onDelete(deletingTaskId);
+      setDeletingTaskId(null);
+      setDeletingTaskTitle('');
     } catch (err) {
       console.error('Failed to delete task:', err);
     } finally {
       setActionLoading(null);
     }
+  };
+
+  const handleDeleteCancel = () => {
+    setDeletingTaskId(null);
+    setDeletingTaskTitle('');
   };
 
   if (loading) {
@@ -114,6 +128,87 @@ export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) 
 
   return (
     <>
+      {/* Delete Confirmation Modal */}
+      {deletingTaskId && (
+        <>
+          <div 
+            className="modal-backdrop fade show" 
+            style={{ backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)' }}
+            onClick={handleDeleteCancel}
+          ></div>
+          
+          <div 
+            className="modal fade show" 
+            style={{ display: 'block' }}
+            tabIndex={-1}
+            role="dialog"
+            aria-labelledby="deleteTaskModalLabel"
+            aria-modal="true"
+            onClick={(e) => {
+              if (e.target === e.currentTarget) {
+                handleDeleteCancel();
+              }
+            }}
+          >
+            <div 
+              className="modal-dialog modal-dialog-centered" 
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div 
+                className="modal-content"
+                onClick={(e) => e.stopPropagation()}
+                style={{ borderRadius: '12px' }}
+              >
+                <div className="modal-header bg-primary text-white" style={{ borderRadius: '12px 12px 0 0' }}>
+                  <h5 className="modal-title" id="deleteTaskModalLabel">
+                    <i className="bi bi-exclamation-triangle-fill me-2"></i>Delete Task
+                  </h5>
+                  <button 
+                    type="button" 
+                    className="btn-close btn-close-white" 
+                    onClick={handleDeleteCancel}
+                    aria-label="Close"
+                  ></button>
+                </div>
+                <div className="modal-body">
+                  <p className="mb-0">
+                    Are you sure you want to delete <strong>"{deletingTaskTitle}"</strong>?
+                  </p>
+                  <p className="text-muted small mt-2 mb-0">This action cannot be undone.</p>
+                </div>
+                <div className="modal-footer">
+                  <button 
+                    type="button" 
+                    className="btn btn-outline-secondary"
+                    onClick={handleDeleteCancel}
+                    disabled={actionLoading === deletingTaskId}
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    type="button" 
+                    className="btn btn-danger"
+                    onClick={handleDeleteConfirm}
+                    disabled={actionLoading === deletingTaskId}
+                  >
+                    {actionLoading === deletingTaskId ? (
+                      <>
+                        <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                        Deleting...
+                      </>
+                    ) : (
+                      <>
+                        <i className="bi bi-trash me-1"></i>Delete
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
       {/* Edit Task Modal */}
       {editingTask && (
         <>
@@ -237,7 +332,7 @@ export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) 
                         </button>
                         <button
                           className="btn btn-outline-danger"
-                          onClick={() => handleDelete(task.id)}
+                          onClick={() => handleDeleteClick(task)}
                           disabled={actionLoading === task.id || isEditing}
                           title="Delete"
                         >
@@ -317,7 +412,7 @@ export function TaskList({ tasks, loading, onUpdate, onDelete }: TaskListProps) 
                       </button>
                       <button
                         className={`btn btn-sm btn-outline-danger ${isLoading && !isEditing ? 'btn-loading' : ''}`}
-                        onClick={() => handleDelete(task.id)}
+                        onClick={() => handleDeleteClick(task)}
                         disabled={actionLoading === task.id || isEditing}
                       >
                         <i className="bi bi-trash"></i> Delete
