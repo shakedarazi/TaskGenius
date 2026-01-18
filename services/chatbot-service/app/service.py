@@ -248,17 +248,26 @@ class ChatbotService:
         
         # Check conversation history for collected fields
         if request.conversation_history:
-            for msg in request.conversation_history[-5:]:  # Check last 5 messages
+            prev_assistant_asked_title = False
+            for i, msg in enumerate(request.conversation_history[-5:]):  # Check last 5 messages
                 content_lower = msg.get("content", "").lower()
                 role = msg.get("role", "")
                 if role == "user":
-                    # Check if user provided title
-                    if any(len(word) > 3 for word in content_lower.split() if word not in ["create", "add", "new", "task", "צור", "הוסף", "תוסיף", "משימה"]):
+                    # Check if user provided title (if previous assistant asked for title, this is likely the answer)
+                    if prev_assistant_asked_title:
+                        # If previous message was assistant asking for title, current user message is the title
+                        has_title = True
+                    # Also check if message contains substantial text (not just commands)
+                    elif any(len(word) > 3 for word in content_lower.split() if word not in ["create", "add", "new", "task", "צור", "הוסף", "תוסיף", "משימה"]):
                         has_title = True
                     # Check if user provided priority
                     if any(priority_word in content_lower for priority_word in ["low", "medium", "high", "urgent", "נמוכה", "בינונית", "גבוהה", "דחופה"]):
                         has_priority = True
+                    prev_assistant_asked_title = False  # Reset after user message
                 elif role == "assistant":
+                    # Check if assistant asked for title
+                    if "title" in content_lower or "כותרת" in content_lower or "which task" in content_lower or "איזו משימה" in content_lower:
+                        prev_assistant_asked_title = True
                     # Check if we already asked about deadline
                     if "deadline" in content_lower or "תאריך" in content_lower or "יעד" in content_lower:
                         has_deadline_asked = True
@@ -380,6 +389,9 @@ class ChatbotService:
 
     def _handle_potential_update(self, request: ChatRequest, is_hebrew: bool = False) -> ChatResponse:
         """Handle potential update task intent - asks for clarification."""
+        # Initialize has_confirmation at the start to avoid UnboundLocalError
+        has_confirmation = False
+        
         if not request.tasks:
             if is_hebrew:
                 reply = "אין לך משימות לעדכן."
@@ -1043,7 +1055,7 @@ class ChatbotService:
             - is_valid: True if deadline is either None, explicit "none", or valid ISO date
             - normalized: ISO date string or None
         """
-        from datetime import datetime, timezone
+        from datetime import datetime, timezone, timedelta
         
         if not deadline:
             return (True, None)
@@ -1074,7 +1086,8 @@ class ChatbotService:
             parsed = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
             # CRITICAL: Check if date is in the past (more than 1 year ago) or too old
             # Reject dates older than 1 year (likely default/old dates)
-            if parsed.year < now.year - 1:
+            # Only reject if the date is actually in the past (more than 1 year old), not just old years
+            if parsed < now - timedelta(days=365):
                 logger.warning(f"Rejecting date too old: {deadline} (year: {parsed.year})")
                 return (False, None)
             # Return normalized ISO string
