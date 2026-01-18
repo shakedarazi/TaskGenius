@@ -33,7 +33,7 @@ export function Layout({ children }: LayoutProps) {
             <header className="layout-header">
                 <nav className="navbar navbar-expand-lg navbar-dark bg-primary">
                     <div className="container">
-                        <Link to="/" className="navbar-brand fw-bold">
+                        <Link to="/tasks" className="navbar-brand fw-bold">
                             TASKGENIUS
                         </Link>
                         <button 
