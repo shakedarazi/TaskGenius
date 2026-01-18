@@ -80,37 +80,52 @@ class ChatbotService:
         has_summary = request.weekly_summary is not None
         logger.debug(f"Context: {task_count} tasks, summary={has_summary}")
 
-        # Phase 1: Try LLM first, fallback to rule-based
+        # PHASE 0: Deterministic routing first (always)
+        # Step 1: Generate deterministic rule-based response
+        deterministic_response = await self._generate_rule_based_response(request)
+        
+        # Step 2: Optional OpenAI NLG post-processing (preserves state markers)
         if settings.USE_LLM and self._openai_client:
             try:
-                response = await self._generate_llm_response(request)
-                if response:
-                    logger.info("Generated response using LLM")
-                    return response
+                is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
+                rewritten_reply = await self._rewrite_reply_nlg(deterministic_response.reply, is_hebrew)
+                deterministic_response.reply = rewritten_reply
+                logger.info("Applied OpenAI NLG post-processing to deterministic reply")
             except Exception as e:
                 # Check if it's a quota/billing error
                 error_msg = str(e)
                 is_quota_error = any(keyword in error_msg.lower() for keyword in ["quota", "429", "insufficient_quota", "billing", "payment"])
                 
                 if is_quota_error:
-                    logger.warning("LLM quota exceeded or billing issue, using rule-based fallback")
-                    # Return a user-friendly message about quota issue
-                    is_hebrew = any('\u0590' <= char <= '\u05FF' for char in request.message)
-                    if is_hebrew:
-                        quota_message = "⚠️ הגעת למגבלת ה-quota של OpenAI. התשובה כאן היא מ-rule-based (לא AI). כדי לחדש: פתח את https://platform.openai.com/account/billing והוסף credit."
-                    else:
-                        quota_message = "⚠️ You've reached your OpenAI quota limit. This response is from rule-based (not AI). To renew: go to https://platform.openai.com/account/billing and add credits."
-                    
-                    # Still generate a rule-based response, but prepend the quota warning
-                    rule_based_response = await self._generate_rule_based_response(request)
-                    rule_based_response.reply = f"{quota_message}\n\n{rule_based_response.reply}"
-                    return rule_based_response
+                    logger.warning("OpenAI NLG quota exceeded, using deterministic reply unchanged")
+                    # Continue with deterministic reply (no quota warning needed, NLG is optional)
                 else:
-                    logger.warning(f"LLM generation failed, falling back to rule-based: {e}")
+                    logger.warning(f"OpenAI NLG post-processing failed, using deterministic reply unchanged: {e}")
         
-        # Fallback to rule-based logic
-        return await self._generate_rule_based_response(request)
+        return deterministic_response
     
+    def _get_last_active_state_marker(self, conversation_history: Optional[List[Dict[str, str]]]) -> Optional[str]:
+        """
+        Extract the last active state marker from conversation_history.
+        
+        Returns the LAST state marker found when scanning from newest to oldest.
+        Returns None if no marker exists.
+        """
+        if not conversation_history:
+            return None
+        
+        # Scan from newest to oldest (reverse order)
+        state_marker_pattern = r'\[\[STATE:[^\]]+\]\]'
+        for msg in reversed(conversation_history):
+            if msg.get("role") == "assistant":
+                content = msg.get("content", "")
+                markers = re.findall(state_marker_pattern, content)
+                if markers:
+                    # Return the last marker found (should be only one per message)
+                    return markers[-1]
+        
+        return None
+
     async def _generate_rule_based_response(self, request: ChatRequest) -> ChatResponse:
         """Generate rule-based response (fallback when LLM is unavailable)."""
         logger.debug("Using rule-based response generation")
@@ -120,6 +135,32 @@ class ChatbotService:
         # Detect if message is in Hebrew (contains Hebrew characters)
         is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)
         
+        # PHASE 0: Active Flow Priority Check (CRITICAL)
+        # If an active state marker exists in conversation_history, DO NOT trigger keyword-based intent detection
+        # This ensures deterministic flow continuation
+        last_state_marker = self._get_last_active_state_marker(request.conversation_history)
+        
+        if last_state_marker:
+            # Active flow exists - route to appropriate handler based on flow type
+            logger.debug(f"Active flow detected (state marker: {last_state_marker}), routing to handler based on flow type")
+            
+            # Extract flow type from state marker (e.g., "CREATE" from "[[STATE:CREATE:ASK_TITLE]]")
+            if ":CREATE:" in last_state_marker:
+                # Continue CREATE flow
+                return self._handle_potential_create(request, is_hebrew)
+            elif ":DELETE:" in last_state_marker:
+                # Continue DELETE flow
+                return self._handle_potential_delete(request, is_hebrew)
+            elif ":UPDATE:" in last_state_marker:
+                # Continue UPDATE flow
+                return self._handle_potential_update(request, is_hebrew)
+            else:
+                # Unknown flow type - fallback to general handler
+                logger.warning(f"Unknown flow type in state marker: {last_state_marker}")
+                return self._handle_general(request, is_hebrew)
+        
+        # Keyword-based intent detection ONLY if no active flow marker exists
+        # This prevents interrupting active flows with accidental keyword matches
         # Phase 2: Improved intent detection with clarification logic
         # Order matters: check more specific intents first
         # Check for task insights (deadlines, priorities, urgency) - highest priority
@@ -137,13 +178,23 @@ class ChatbotService:
         elif any(word in message_lower for word in ["complete", "done", "finish", "בוצע", "סיים", "סיימתי"]):
             return self._handle_potential_update(request, is_hebrew)
         
-        # Check for list tasks
+        # Check for create/add intent BEFORE list_tasks (to prevent Hebrew create phrases from being misrouted)
+        # Hebrew create detection: requires both create verb AND "משימה"
+        hebrew_create_verbs = ["הוסף", "תוסיף", "להוסיף", "צור", "תיצור", "ליצור", "יצירת", "הוספת"]
+        has_hebrew_create_verb = any(verb in message_lower for verb in hebrew_create_verbs)
+        has_hebrew_task_word = "משימה" in message_lower or "משימה חדשה" in message_lower
+        if has_hebrew_create_verb and has_hebrew_task_word:
+            return self._handle_potential_create(request, is_hebrew)
+        
+        # English create keywords (also check before list_tasks)
+        elif any(word in message_lower for word in ["create", "add", "new"]):
+            # For English, check if it's likely a create intent (contains "task" or similar)
+            if any(word in message_lower for word in ["task", "item", "todo"]):
+                return self._handle_potential_create(request, is_hebrew)
+        
+        # Check for list tasks (after create checks to prevent misrouting)
         elif any(word in message_lower for word in ["list", "show", "tasks", "what", "רשימה", "הצג", "מה"]):
             return self._handle_list_tasks(request, is_hebrew)
-        
-        # Check for create intent (potential - needs clarification) - last, as "task" is common
-        elif any(word in message_lower for word in ["create", "add", "new", "צור", "הוסף", "תוסיף"]):
-            return self._handle_potential_create(request, is_hebrew)
         
         # Check for help
         elif any(word in message_lower for word in ["help", "how", "what can", "עזרה", "איך"]):
@@ -236,99 +287,228 @@ class ChatbotService:
         )
 
     def _handle_potential_create(self, request: ChatRequest, is_hebrew: bool = False) -> ChatResponse:
-        """Handle potential create task intent - asks for clarification."""
-        # Check conversation history to see what was already asked
-        has_title = False
-        has_priority = False
-        has_deadline_asked = False
+        """
+        Phase 1: Handle add_task FSM with deterministic state markers.
         
-        # Check current message for title
-        message_words = request.message.split()
-        has_title = any(len(word) > 3 for word in message_words if word.lower() not in ["create", "add", "new", "task", "צור", "הוסף", "תוסיף", "משימה", "low", "medium", "high", "urgent", "נמוכה", "בינונית", "גבוהה", "דחופה"])
-        
-        # Check conversation history for collected fields
+        FSM Flow: INITIAL → ASK_TITLE → ASK_PRIORITY → ASK_DEADLINE → READY
+        State inference from conversation_history (last marker wins).
+        """
+        # PHASE 1: State inference from conversation_history (deterministic)
+        # Get last active state marker (if any) by scanning from newest to oldest
+        current_state = None
         if request.conversation_history:
-            prev_assistant_asked_title = False
-            for i, msg in enumerate(request.conversation_history[-5:]):  # Check last 5 messages
-                content_lower = msg.get("content", "").lower()
-                role = msg.get("role", "")
-                if role == "user":
-                    # Check if user provided title (if previous assistant asked for title, this is likely the answer)
-                    if prev_assistant_asked_title:
-                        # If previous message was assistant asking for title, current user message is the title
-                        has_title = True
-                    # Also check if message contains substantial text (not just commands)
-                    elif any(len(word) > 3 for word in content_lower.split() if word not in ["create", "add", "new", "task", "צור", "הוסף", "תוסיף", "משימה"]):
-                        has_title = True
-                    # Check if user provided priority
-                    if any(priority_word in content_lower for priority_word in ["low", "medium", "high", "urgent", "נמוכה", "בינונית", "גבוהה", "דחופה"]):
-                        has_priority = True
-                    prev_assistant_asked_title = False  # Reset after user message
-                elif role == "assistant":
-                    # Check if assistant asked for title
-                    if "title" in content_lower or "כותרת" in content_lower or "which task" in content_lower or "איזו משימה" in content_lower:
-                        prev_assistant_asked_title = True
-                    # Check if we already asked about deadline
-                    if "deadline" in content_lower or "תאריך" in content_lower or "יעד" in content_lower:
-                        has_deadline_asked = True
+            # Scan from newest to oldest
+            for msg in reversed(request.conversation_history):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if "[[STATE:CREATE:ASK_TITLE]]" in content:
+                        current_state = "ASK_TITLE"
+                        break
+                    elif "[[STATE:CREATE:ASK_PRIORITY]]" in content:
+                        current_state = "ASK_PRIORITY"
+                        break
+                    elif "[[STATE:CREATE:ASK_DEADLINE]]" in content:
+                        current_state = "ASK_DEADLINE"
+                        break
         
-        if is_hebrew:
-            if not has_title:
-                replies = [
-                    "אני מבין שאתה רוצה ליצור משימה. איזו משימה תרצה ליצור? תן לי כותרת.",
-                    "בוא ניצור משימה חדשה! מה הכותרת של המשימה?",
-                    "אני יכול לעזור לך ליצור משימה. מה תרצה להוסיף לרשימה?"
-                ]
-                reply = replies[hash(request.user_id + request.message) % len(replies)]
-            elif not has_priority:
-                replies = [
-                    "מעולה! עכשיו אני צריך לדעת מה העדיפות. מה העדיפות של המשימה? (נמוכה/בינונית/גבוהה/דחופה)",
-                    "טוב! כדי להמשיך, מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה)",
-                    "נהדר! עכשיו אני צריך לדעת מה העדיפות. מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה)"
-                ]
-                reply = replies[hash(request.user_id + request.message) % len(replies)]
-            elif not has_deadline_asked:
-                replies = [
-                    "מצוין! האם יש תאריך יעד למשימה? (אם לא, פשוט תגיד 'לא' או 'אין')",
-                    "טוב! האם יש תאריך יעד? (אם לא, תגיד 'לא')",
-                    "נהדר! האם יש תאריך יעד למשימה? (אם לא, תגיד 'אין')"
-                ]
-                reply = replies[hash(request.user_id + request.message) % len(replies)]
+        # If no state marker found, start at INITIAL
+        if current_state is None:
+            current_state = "INITIAL"
+        
+        # Initialize fields dictionary for command
+        fields = {}
+        missing_fields = []
+        ready = False
+        confidence = 0.7
+        
+        # PHASE 1: State machine logic (deterministic)
+        if current_state == "INITIAL":
+            # INITIAL state: Ask for title
+            if is_hebrew:
+                reply = "בוא ניצור משימה חדשה! מה הכותרת של המשימה?"
             else:
-                # All fields collected, should be ready (but LLM will validate)
-                reply = "מעולה! אני מוכן ליצור את המשימה. האם אתה מוכן?"
-            suggestions = ["הגדר תאריך יעד", "הוסף קטגוריה", "הגדר עדיפות"] if not has_priority else (["הגדר תאריך יעד"] if not has_deadline_asked else [])
+                reply = "Let's create a new task! What's the task title?"
+            reply += "\n[[STATE:CREATE:ASK_TITLE]]"
+            missing_fields = ["title"]
+        
+        elif current_state == "ASK_TITLE":
+            # ASK_TITLE state: Extract title, ask for priority
+            title = request.message.strip()
+            # Basic validation: non-empty text
+            if not title or len(title) < 1:
+                # Invalid title, re-ask
+                if is_hebrew:
+                    reply = "אני צריך כותרת למשימה. מה הכותרת?"
+                else:
+                    reply = "I need a title for the task. What's the title?"
+                reply += "\n[[STATE:CREATE:ASK_TITLE]]"
+                missing_fields = ["title"]
+            else:
+                # Valid title, move to ASK_PRIORITY
+                fields["title"] = title
+                if is_hebrew:
+                    reply = f"מעולה! עכשיו אני צריך לדעת מה העדיפות. מה העדיפות של המשימה '{title}'? (נמוכה/בינונית/גבוהה/דחופה)"
+                else:
+                    reply = f"Great! Now I need to know the priority. What's the priority for '{title}'? (low/medium/high/urgent)"
+                reply += "\n[[STATE:CREATE:ASK_PRIORITY]]"
+                missing_fields = ["priority"]
+        
+        elif current_state == "ASK_PRIORITY":
+            # ASK_PRIORITY state: Extract priority (with Hebrew support), ask for deadline
+            priority_input = request.message.strip().lower()
+            
+            # Priority mapping (Hebrew → English canonical values)
+            priority_map = {
+                # English
+                "low": "low",
+                "medium": "medium",
+                "high": "high",
+                "urgent": "urgent",
+                # Hebrew
+                "נמוכה": "low",
+                "בינונית": "medium",
+                "גבוהה": "high",
+                "דחופה": "urgent",
+            }
+            
+            canonical_priority = priority_map.get(priority_input)
+            
+            # Recover title from conversation_history (find user message after ASK_TITLE marker)
+            if "title" not in fields and request.conversation_history:
+                # Scan history from newest to oldest
+                for i in range(len(request.conversation_history) - 1, -1, -1):
+                    msg = request.conversation_history[i]
+                    if msg.get("role") == "assistant" and "[[STATE:CREATE:ASK_TITLE]]" in msg.get("content", ""):
+                        # Next message (after this) should be user's title
+                        if i + 1 < len(request.conversation_history):
+                            next_msg = request.conversation_history[i + 1]
+                            if next_msg.get("role") == "user":
+                                title = next_msg.get("content", "").strip()
+                                if title:
+                                    fields["title"] = title
+                                    break
+            
+            if not canonical_priority:
+                # Invalid priority, re-ask
+                if is_hebrew:
+                    reply = "אני צריך עדיפות תקינה. מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה)"
+                else:
+                    reply = "I need a valid priority. What's the priority? (low/medium/high/urgent)"
+                reply += "\n[[STATE:CREATE:ASK_PRIORITY]]"
+                missing_fields = ["priority"]
+            else:
+                # Valid priority, move to ASK_DEADLINE
+                fields["priority"] = canonical_priority
+                title_text = fields.get("title", "the task")
+                if is_hebrew:
+                    reply = f"מצוין! האם יש תאריך יעד למשימה '{title_text}'? (אם לא, פשוט תגיד 'לא' או 'אין')"
+                else:
+                    reply = f"Perfect! Is there a deadline for '{title_text}'? (If not, just say 'no' or 'none')"
+                reply += "\n[[STATE:CREATE:ASK_DEADLINE]]"
+                missing_fields = ["deadline"]
+        
+        elif current_state == "ASK_DEADLINE":
+            # ASK_DEADLINE state: Extract deadline (ISO or explicit none), set ready=true
+            deadline_input = request.message.strip()
+            
+            # Recover title and priority from conversation_history (if not already in fields)
+            if ("title" not in fields or "priority" not in fields) and request.conversation_history:
+                # Find title: user message after ASK_TITLE marker
+                if "title" not in fields:
+                    for i in range(len(request.conversation_history) - 1, -1, -1):
+                        msg = request.conversation_history[i]
+                        if msg.get("role") == "assistant" and "[[STATE:CREATE:ASK_TITLE]]" in msg.get("content", ""):
+                            if i + 1 < len(request.conversation_history):
+                                next_msg = request.conversation_history[i + 1]
+                                if next_msg.get("role") == "user":
+                                    title = next_msg.get("content", "").strip()
+                                    if title:
+                                        fields["title"] = title
+                                        break
+                
+                # Find priority: user message after ASK_PRIORITY marker
+                if "priority" not in fields:
+                    priority_map = {
+                        "low": "low", "medium": "medium", "high": "high", "urgent": "urgent",
+                        "נמוכה": "low", "בינונית": "medium", "גבוהה": "high", "דחופה": "urgent",
+                    }
+                    for i in range(len(request.conversation_history) - 1, -1, -1):
+                        msg = request.conversation_history[i]
+                        if msg.get("role") == "assistant" and "[[STATE:CREATE:ASK_PRIORITY]]" in msg.get("content", ""):
+                            if i + 1 < len(request.conversation_history):
+                                next_msg = request.conversation_history[i + 1]
+                                if next_msg.get("role") == "user":
+                                    priority_input_hist = next_msg.get("content", "").strip().lower()
+                                    canonical_priority = priority_map.get(priority_input_hist)
+                                    if canonical_priority:
+                                        fields["priority"] = canonical_priority
+                                        break
+            
+            # Validate deadline format (ISO numeric or explicit none)
+            is_valid, normalized_deadline = self._validate_deadline_format(deadline_input)
+            
+            # Check for explicit none keywords
+            none_keywords = ["no", "none", "skip", "לא", "אין", "בלי", "דלג"]
+            is_explicit_none = deadline_input.lower().strip() in [kw.lower() for kw in none_keywords]
+            
+            if is_explicit_none:
+                # Explicit none - valid, set deadline to None
+                fields["deadline"] = None
+                ready = True
+                confidence = 1.0
+                missing_fields = []
+                title_text = fields.get("title", "the task")
+                if is_hebrew:
+                    reply = f"מעולה! אני מוכן ליצור את המשימה '{title_text}' ללא תאריך יעד."
+                else:
+                    reply = f"Great! I'm ready to create the task '{title_text}' without a deadline."
+            elif is_valid and normalized_deadline:
+                # Valid ISO date - set deadline
+                fields["deadline"] = normalized_deadline
+                ready = True
+                confidence = 1.0
+                missing_fields = []
+                title_text = fields.get("title", "the task")
+                if is_hebrew:
+                    reply = f"מעולה! אני מוכן ליצור את המשימה '{title_text}' עם תאריך יעד {normalized_deadline}."
+                else:
+                    reply = f"Perfect! I'm ready to create the task '{title_text}' with deadline {normalized_deadline}."
+            else:
+                # Invalid or ambiguous deadline - re-ask for numeric date
+                if is_hebrew:
+                    reply = "אני צריך תאריך במספרים (למשל: 2024-01-20), או כתוב 'לא' אם אין תאריך יעד."
+                else:
+                    reply = "I need a date in numeric format (e.g., 2024-01-20), or say 'no' if there's no deadline."
+                reply += "\n[[STATE:CREATE:ASK_DEADLINE]]"
+                missing_fields = ["deadline"]
+        
         else:
-            if not has_title:
-                replies = [
-                    "I understand you want to create a task. Which task would you like to create? Please provide a title.",
-                    "Let's create a new task! What's the task title?",
-                    "I can help you create a task. What would you like to add to your list?"
-                ]
-                reply = replies[hash(request.user_id + request.message) % len(replies)]
-            elif not has_priority:
-                replies = [
-                    "Great! Now I need to know the priority. What's the priority? (low/medium/high/urgent)",
-                    "Good! To continue, what's the priority? (low/medium/high/urgent)",
-                    "Perfect! Now I need to know the priority. What's the priority? (low/medium/high/urgent)"
-                ]
-                reply = replies[hash(request.user_id + request.message) % len(replies)]
-            elif not has_deadline_asked:
-                replies = [
-                    "Excellent! Is there a deadline for this task? (If not, just say 'no' or 'none')",
-                    "Good! Is there a deadline? (If not, say 'no')",
-                    "Perfect! Is there a deadline for this task? (If not, say 'none')"
-                ]
-                reply = replies[hash(request.user_id + request.message) % len(replies)]
+            # Fallback (should not happen)
+            logger.warning(f"Unknown state in _handle_potential_create: {current_state}")
+            current_state = "INITIAL"
+            if is_hebrew:
+                reply = "בוא ניצור משימה חדשה! מה הכותרת של המשימה?"
             else:
-                # All fields collected, should be ready (but LLM will validate)
-                reply = "Great! I'm ready to create the task. Are you ready?"
-            suggestions = ["Set deadline", "Add category", "Set priority"] if not has_priority else (["Set deadline"] if not has_deadline_asked else [])
+                reply = "Let's create a new task! What's the task title?"
+            reply += "\n[[STATE:CREATE:ASK_TITLE]]"
+            missing_fields = ["title"]
+        
+        # Create command object
+        command = Command(
+            intent="add_task",
+            confidence=confidence,
+            fields=fields if fields else None,
+            ref=None,
+            filter=None,
+            ready=ready,
+            missing_fields=missing_fields if missing_fields else None
+        )
         
         return ChatResponse(
             reply=reply,
-            intent="potential_create",
-            suggestions=suggestions
+            intent="add_task",
+            suggestions=[],
+            command=command
         )
 
     def _handle_task_insights(self, request: ChatRequest, is_hebrew: bool = False) -> ChatResponse:
@@ -977,6 +1157,89 @@ class ChatbotService:
         
         return "\n".join(prompt_parts)
 
+    async def _rewrite_reply_nlg(self, deterministic_reply: str, is_hebrew: bool) -> str:
+        """
+        Rewrite deterministic reply using OpenAI NLG (Natural Language Generation).
+        This function is used ONLY for post-processing reply text after deterministic routing.
+        
+        CRITICAL: This function preserves state markers and meaning exactly.
+        - Preserves state markers verbatim (never removes or modifies [[STATE:...]] markers)
+        - Preserves meaning exactly
+        - Preserves structure and number of questions
+        - Preserves language
+        
+        Args:
+            deterministic_reply: The deterministic reply text generated by rule-based logic
+            is_hebrew: Whether the reply is in Hebrew
+            
+        Returns:
+            Rewritten reply text (or original if OpenAI fails)
+        """
+        if not self._openai_client:
+            return deterministic_reply
+        
+        try:
+            # Extract state markers from deterministic reply
+            state_marker_pattern = r'\[\[STATE:[^\]]+\]\]'
+            state_markers = re.findall(state_marker_pattern, deterministic_reply)
+            
+            # Remove state markers temporarily for NLG (they will be re-inserted)
+            reply_without_markers = re.sub(state_marker_pattern, '', deterministic_reply).strip()
+            
+            if not reply_without_markers:
+                # If reply was only state markers, return as-is
+                return deterministic_reply
+            
+            # Build NLG prompt (preserve meaning, structure, language)
+            language_instruction = "Hebrew (עברית)" if is_hebrew else "English"
+            system_prompt = f"""You are a natural language generation assistant for TaskGenius.
+Your ONLY task is to rewrite the given deterministic reply to make it more natural, while preserving:
+1. Meaning exactly (do not change any facts or questions)
+2. Structure and number of questions (do not add or remove questions)
+3. Language ({language_instruction})
+4. All lists and options (preserve exactly)
+
+IMPORTANT: Do NOT:
+- Add new steps or questions
+- Change the meaning
+- Remove or modify any information
+- Add suggestions unless they were already there
+
+Just make the text more natural and conversational while keeping everything else identical."""
+
+            logger.debug(f"Applying OpenAI NLG to rewrite reply (language: {language_instruction})")
+            
+            # Call OpenAI API for NLG
+            response = await self._openai_client.chat.completions.create(
+                model=settings.MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Rewrite this reply to be more natural while preserving everything exactly:\n\n{reply_without_markers}"}
+                ],
+                temperature=0.3,  # Lower temperature for more deterministic output
+                max_tokens=300,
+                timeout=settings.LLM_TIMEOUT,
+            )
+            
+            rewritten_reply = response.choices[0].message.content.strip()
+            
+            if not rewritten_reply:
+                logger.warning("Empty rewritten reply from OpenAI NLG, using original")
+                return deterministic_reply
+            
+            # Re-insert state markers at the end (preserve verbatim)
+            if state_markers:
+                # Append state markers to the rewritten reply
+                rewritten_reply = f"{rewritten_reply}\n{''.join(state_markers)}"
+            
+            logger.debug("OpenAI NLG rewrite completed successfully")
+            return rewritten_reply
+            
+        except Exception as e:
+            logger.warning(f"OpenAI NLG rewrite failed, using original reply: {e}")
+            # Return original deterministic reply on any failure
+            return deterministic_reply
+
     async def _generate_llm_response(self, request: ChatRequest) -> Optional[ChatResponse]:
         """
         Generate response using LLM (OpenAI).
@@ -1095,25 +1358,73 @@ class ChatbotService:
         except (ValueError, AttributeError):
             pass
         
-        # Try to parse common date formats (DD/MM/YYYY, DD-MM-YYYY, etc.)
+        # Try to parse common date formats (DD/MM/YYYY, DD-MM-YYYY, DD.MM, DD.MM.YYYY, etc.)
         try:
-            # Try DD/MM/YYYY or DD-MM-YYYY
-            if "/" in deadline or "-" in deadline:
-                # Check if it's a date format (has numbers)
-                if any(char.isdigit() for char in deadline):
-                    # Try parsing with different formats
-                    for fmt in ["%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d"]:
-                        try:
-                            parsed = datetime.strptime(deadline.strip(), fmt)
-                            # Check if date is too old
-                            if parsed.year < now.year - 1:
-                                logger.warning(f"Rejecting date too old: {deadline} (year: {parsed.year})")
-                                return (False, None)
-                            # Return normalized ISO string
-                            return (True, parsed.isoformat())
-                        except ValueError:
-                            continue
-        except Exception:
+            # Only accept formats with digits and separators (-, ., /)
+            if not re.match(r'^[\d.\-/]+$', deadline.strip()):
+                # Contains non-numeric, non-separator characters - reject
+                return (False, None)
+            
+            # Deterministic parsing: split by separators and interpret
+            deadline_clean = deadline.strip()
+            parts = re.split(r'[-./]', deadline_clean)
+            
+            if len(parts) == 3:
+                # Three parts: determine if YYYY-MM-DD or DD-MM-YYYY
+                part1, part2, part3 = parts
+                if len(part1) == 4 and part1.isdigit():
+                    # First part is 4 digits → interpret as YYYY-MM-DD (or YYYY/MM/DD)
+                    year, month, day = int(part1), int(part2), int(part3)
+                else:
+                    # First part is not 4 digits → interpret as DD-MM-YYYY (or DD/MM/YYYY)
+                    day, month, year = int(part1), int(part2), int(part3)
+                
+                # Validate ranges
+                if not (1 <= month <= 12):
+                    return (False, None)
+                if not (1 <= day <= 31):
+                    return (False, None)
+                
+                try:
+                    parsed = datetime(year, month, day, tzinfo=timezone.utc)
+                except ValueError:
+                    # Invalid date (e.g., 31-02)
+                    return (False, None)
+            
+            elif len(parts) == 2:
+                # Two parts: interpret as DD-MM (or DD/MM) and inject current year
+                part1, part2 = parts
+                day, month = int(part1), int(part2)
+                
+                # Validate ranges
+                if not (1 <= month <= 12):
+                    return (False, None)
+                if not (1 <= day <= 31):
+                    return (False, None)
+                
+                # Inject current year
+                year = now.year
+                try:
+                    parsed = datetime(year, month, day, tzinfo=timezone.utc)
+                except ValueError:
+                    # Invalid date (e.g., 31-02)
+                    return (False, None)
+            
+            else:
+                # Not 2 or 3 parts - invalid format
+                return (False, None)
+            
+            # Check if date is too old (more than 1 year in the past)
+            if parsed < now - timedelta(days=365):
+                logger.warning(f"Rejecting date too old: {deadline} (year: {parsed.year})")
+                return (False, None)
+            
+            # Convert to canonical ISO format (YYYY-MM-DD)
+            normalized = parsed.strftime("%Y-%m-%d")
+            return (True, normalized)
+            
+        except (ValueError, AttributeError, IndexError) as e:
+            logger.debug(f"Date parsing error for '{deadline}': {e}")
             pass
         
         # If we can't parse, it's invalid

@@ -1,5 +1,5 @@
 # TaskGenius Chat System — Deterministic FSM Implementation Summary
-## Revision v2.1 (Execution & Priority Patch)
+## Revision v2.1 (Scope Guard Patch)
 
 ---
 
@@ -178,11 +178,37 @@ Task identification follows strict priority:
 - If a conversation starts in English, all assistant replies remain in English
 - Language is re-detected per message (user can switch languages mid-conversation)
 
+### 9. Strict Scope Guard (Applies to All Phases)
+
+**Critical Scope Enforcement:**
+- During all phases, modifications are **STRICTLY LIMITED** to:
+  - `chatbot-service` (chat logic, FSM, NLG rewrite, schemas)
+  - `core-api/app/chat/*` (execution gating and command handling ONLY)
+
+**Explicitly Forbidden Modifications:**
+- Modify authentication logic
+- Modify task repository implementations
+- Modify database schemas
+- Modify business logic unrelated to chat command execution
+- Modify frontend/client code (unless a future phase explicitly allows it)
+- Perform refactors, cleanups, or optimizations outside the chatbot scope
+
+**Uncertainty Handling:**
+- If a required change appears to be outside this scope:
+  - The system **MUST STOP** and **REPORT** the required change
+  - The change **MUST NOT** be implemented without explicit approval
+- If the implementer is unsure whether a change affects non-chatbot code:
+  - Assume it is **OUT OF SCOPE**
+  - Do **NOT** change it
+  - Report it as a finding instead
+
 ---
 
 ## Phased Implementation Summary
 
 ### Phase 0: Baseline Deterministic Wiring
+
+**Scope Guard:** This phase MUST NOT modify any code outside the chatbot-service and the chat execution layer in core-api. All unrelated code MUST remain unchanged.
 
 **Goal:** Establish deterministic routing as the single source of truth, remove intent-rewriting hacks, and audit end-to-end behavior.
 
@@ -241,6 +267,8 @@ Task identification follows strict priority:
 ---
 
 ### Phase 1: Add Task FSM (Deterministic)
+
+**Scope Guard:** This phase MUST NOT modify any code outside the chatbot-service and the chat execution layer in core-api. All unrelated code MUST remain unchanged.
 
 **Goal:** Implement deterministic add_task flow with explicit state markers and strict field order.
 
@@ -346,6 +374,8 @@ return INITIAL
 
 ### Phase 2: Delete Task FSM (Deterministic + Confirmation)
 
+**Scope Guard:** This phase MUST NOT modify any code outside the chatbot-service and the chat execution layer in core-api. All unrelated code MUST remain unchanged.
+
 **Goal:** Implement deterministic delete_task flow with mandatory confirmation and explicit state markers.
 
 **FSM Flow:**
@@ -450,6 +480,8 @@ INITIAL → IDENTIFY_TASK → [SELECT_TASK] → ASK_CONFIRMATION → READY
 ---
 
 ### Phase 3: Update Task FSM (Deterministic + Field Selection + Confirmation)
+
+**Scope Guard:** This phase MUST NOT modify any code outside the chatbot-service and the chat execution layer in core-api. All unrelated code MUST remain unchanged.
 
 **Goal:** Implement deterministic update_task flow with field selection, value collection, and mandatory confirmation.
 
@@ -681,6 +713,6 @@ This document defines the deterministic FSM-based chat architecture for TaskGeni
 
 ---
 
-**Document Version:** Revision v2.1 (Execution & Priority Patch)  
+**Document Version:** Revision v2.1 (Scope Guard Patch)  
 **Last Updated:** [Current Date]  
 **Status:** Implementation Specification
