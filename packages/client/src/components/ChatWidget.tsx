@@ -161,15 +161,21 @@ export function ChatWidget({ onTaskCreated }: ChatWidgetProps) {
             
             // Trigger refresh if a task was created/updated/deleted
             // Check intent to determine if a task mutation occurred
-            if (response.intent === 'create_task' || response.intent === 'update_task' || response.intent === 'delete_task') {
+            // CRITICAL: Also clear history if update/delete was cancelled (user didn't confirm)
+            // This ensures next commands rely on DB, not conversation history
+            if (response.intent === 'create_task' || response.intent === 'update_task' || response.intent === 'delete_task' ||
+                response.intent === 'update_task_cancelled' || response.intent === 'delete_task_cancelled') {
                 // Rule 4, 5: Clear chat history after CRUD (hard reset)
+                // Also clear if update/delete was cancelled (user didn't write "yes"/"ok")
                 setMessages([]);
                 localStorage.removeItem(CHAT_HISTORY_KEY);
                 
-                // Dispatch custom event to notify TasksPage to refresh
-                window.dispatchEvent(new CustomEvent('taskMutated', { 
-                    detail: { intent: response.intent } 
-                }));
+                // Dispatch custom event to notify TasksPage to refresh (only if actually executed)
+                if (response.intent === 'create_task' || response.intent === 'update_task' || response.intent === 'delete_task') {
+                    window.dispatchEvent(new CustomEvent('taskMutated', { 
+                        detail: { intent: response.intent } 
+                    }));
+                }
             }
         } catch (err) {
             const errorMessage: ChatMessage = {

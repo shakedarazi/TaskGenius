@@ -128,11 +128,12 @@ class ChatbotService:
         elif any(word in message_lower for word in ["urgent", "priority", "deadline", "due", "דחוף", "עדיפות", "תאריך"]):
             return self._handle_task_insights(request, is_hebrew)
         
-        # Check for update/delete/complete intents BEFORE create (more specific)
+        # Check for delete intent FIRST (before update) - more destructive, needs higher priority
+        elif any(word in message_lower for word in ["delete", "remove", "מחק", "הסר", "תמחק", "תמחקי"]):
+            return self._handle_potential_delete(request, is_hebrew)
+        # Check for update/complete intents (less destructive than delete)
         elif any(word in message_lower for word in ["update", "change", "modify", "edit", "עדכן", "שנה", "ערוך"]):
             return self._handle_potential_update(request, is_hebrew)
-        elif any(word in message_lower for word in ["delete", "remove", "מחק", "הסר"]):
-            return self._handle_potential_delete(request, is_hebrew)
         elif any(word in message_lower for word in ["complete", "done", "finish", "בוצע", "סיים", "סיימתי"]):
             return self._handle_potential_update(request, is_hebrew)
         
@@ -868,32 +869,64 @@ class ChatbotService:
         prompt_parts.append('  "missing_fields": ["field1", "field2"]  // List missing required fields')
         prompt_parts.append("}")
         prompt_parts.append("")
-        prompt_parts.append("DATE/DEADLINE HANDLING RULES:")
+        prompt_parts.append("DATE/DEADLINE HANDLING RULES (CRITICAL - MUST FOLLOW):")
         prompt_parts.append("- When user provides a date/deadline, try to understand it (e.g., 'tomorrow', 'יום רביעי', '20.1', '2024-01-20')")
-        prompt_parts.append("- If you CANNOT clearly understand the date format (e.g., ambiguous relative dates, unclear formats),")
-        prompt_parts.append("  DO NOT guess or use old dates. Instead, ask the user to provide the date in a clear numeric format.")
+        prompt_parts.append("- If user says 'no', 'none', 'אין', or 'לא' when asked about deadline → set deadline to null (no deadline)")
+        prompt_parts.append("- CRITICAL: If user provides ANYTHING ELSE that is NOT 'no'/'none'/'אין'/'לא' AND is NOT a clear, valid date,")
+        prompt_parts.append("  DO NOT guess or use default dates. DO NOT use old dates (e.g., 2023, 25/10/2023).")
+        prompt_parts.append("  DO NOT try to interpret unclear text as a date.")
+        prompt_parts.append("  Instead, in your REPLY, ask the user: 'אנא תן תאריך במספרים (למשל: 2024-01-20 או 20.1.2024), או כתוב 'לא' אם אין תאריך יעד'")
+        prompt_parts.append("  (or in English: 'Please provide a date in numbers (e.g., 2024-01-20 or 20.1.2024), or write 'no' if there's no deadline')")
+        prompt_parts.append("  In the COMMAND, set deadline to null and set ready=false with 'deadline' in missing_fields.")
+        prompt_parts.append("- NEVER use dates from years ago (e.g., 2023, 25/10/2023) - these are invalid and will be rejected by the system.")
+        prompt_parts.append("- NEVER use default/placeholder dates - only use dates explicitly provided by the user in a clear format.")
         prompt_parts.append("- Example: If user says 'יום רביעי' and you're not sure which Wednesday, ask: 'איזה יום רביעי? אנא תן תאריך במספרים (למשל: 20.1.2024)'")
         prompt_parts.append("- Example: If user says 'tomorrow' but context is unclear, ask: 'What date is tomorrow? Please provide the date in numbers (e.g., 2024-01-20)'")
-        prompt_parts.append("- NEVER use dates from years ago (e.g., 2023) unless explicitly stated by the user.")
-        prompt_parts.append("- If you cannot parse the date, set deadline to null and ask the user for clarification in numeric format.")
+        prompt_parts.append("- Example: If user writes something unclear like 'maybe next week' or 'I don't know' (not 'no'/'none' and not a clear date),")
+        prompt_parts.append("  ask: 'אנא תן תאריך במספרים (למשל: 2024-01-20), או כתוב 'לא' אם אין תאריך יעד'")
+        prompt_parts.append("  (or in English: 'Please provide a date in numbers (e.g., 2024-01-20), or write 'no' if there's no deadline')")
         prompt_parts.append("")
         prompt_parts.append("RULES FOR COMMAND GENERATION:")
         prompt_parts.append("- For 'add_task': Set ready=true ONLY if BOTH title AND priority are provided. confidence>=0.8 only if both are clear.")
         prompt_parts.append("  REQUIRED FIELDS for add_task: title (mandatory), priority (mandatory), deadline (optional - ask but can be null)")
-        prompt_parts.append("  WORKFLOW: 1) Ask for title → 2) Ask for priority → 3) Ask for deadline (can skip or ask for numeric format if unclear) → 4) Execute when title+priority are ready")
+        prompt_parts.append("  WORKFLOW (MUST FOLLOW THIS ORDER - ONE STEP AT A TIME):")
+        prompt_parts.append("    1) FIRST: Ask for title ONLY (e.g., 'What task would you like to create? Please provide a title.')")
+        prompt_parts.append("    2) SECOND: After user provides title, ask for priority ONLY (e.g., 'What's the priority? (low/medium/high/urgent)')")
+        prompt_parts.append("    3) THIRD: After user provides priority, ask for deadline ONLY (e.g., 'Is there a deadline? (If not, say 'no' or 'none')')")
+        prompt_parts.append("    4) FINAL: Execute when title+priority are ready (deadline can be null)")
+        prompt_parts.append("  CRITICAL: DO NOT ask for multiple fields at once. Ask ONE field at a time, wait for user response, then ask the next field.")
+        prompt_parts.append("  CRITICAL: Check conversation history to see what was already asked. If title was asked but not provided, ask for title again.")
+        prompt_parts.append("  CRITICAL: If user provides multiple fields at once (e.g., 'add task buy milk high priority'), extract all fields but still follow the workflow order in your reply.")
         prompt_parts.append("- For 'update_task': Set ready=true ONLY if task is unambiguous AND title AND priority are provided/confirmed AND user explicitly confirmed (said 'yes'/'כן'/'confirm').")
         prompt_parts.append("  REQUIRED FIELDS for update_task:")
         prompt_parts.append("    - ref.task_id OR ref.title (mandatory - must identify which task to update)")
         prompt_parts.append("    - fields.title (mandatory - new title)")
         prompt_parts.append("    - fields.priority (mandatory - new priority)")
         prompt_parts.append("    - fields.deadline (optional - ask but can be null)")
-        prompt_parts.append("  WORKFLOW: 1) Identify task → 2) Ask for title (or confirm existing) → 3) Ask for priority → 4) Ask for deadline (can skip) → 5) Ask for confirmation → 6) Execute ONLY after explicit confirmation")
+        prompt_parts.append("  WORKFLOW (MUST FOLLOW THIS ORDER - ONE STEP AT A TIME):")
+        prompt_parts.append("    1) FIRST: Identify which task to update (ask if unclear)")
+        prompt_parts.append("    2) SECOND: Ask for new title (or confirm existing)")
+        prompt_parts.append("    3) THIRD: Ask for new priority")
+        prompt_parts.append("    4) FOURTH: Ask for deadline (can skip)")
+        prompt_parts.append("    5) FIFTH: Ask for confirmation (e.g., 'Are you ready to update? (yes/no)')")
+        prompt_parts.append("    6) FINAL: Execute ONLY after explicit confirmation")
+        prompt_parts.append("  CRITICAL: DO NOT ask for multiple fields at once. Ask ONE field at a time, wait for user response, then ask the next field.")
         prompt_parts.append("  CRITICAL: If the assistant asked 'Are you ready?' or 'Confirm update?' and user replied 'yes'/'כן'/'confirm', then:")
         prompt_parts.append("    - Set intent='update_task' (NOT 'potential_update')")
         prompt_parts.append("    - Set ready=true")
         prompt_parts.append("    - Set ref.task_id or ref.title to identify the task")
         prompt_parts.append("    - Set fields.title and fields.priority with the new values")
-        prompt_parts.append("- For 'delete_task'/'complete_task': Set ready=true ONLY if task is unambiguous. confidence>=0.8 only if task reference is clear.")
+        prompt_parts.append("- For 'delete_task': Set ready=true ONLY if task is unambiguous AND user explicitly confirmed (said 'yes'/'כן'/'ok'/'אוקיי').")
+        prompt_parts.append("  REQUIRED for delete_task:")
+        prompt_parts.append("    - ref.task_id OR ref.title (mandatory - must identify which task to delete)")
+        prompt_parts.append("    - User explicit confirmation (mandatory - user must say 'yes'/'כן'/'ok'/'אוקיי' after being asked)")
+        prompt_parts.append("  WORKFLOW: 1) Identify task → 2) Present task description → 3) Ask for confirmation → 4) Execute ONLY after explicit confirmation")
+        prompt_parts.append("  CRITICAL: If the assistant asked 'Are you sure?' or 'בטוח?' and user replied 'yes'/'כן'/'ok'/'אוקיי', then:")
+        prompt_parts.append("    - Set intent='delete_task' (NOT 'potential_delete')")
+        prompt_parts.append("    - Set ready=true")
+        prompt_parts.append("    - Set ref.task_id or ref.title to identify the task")
+        prompt_parts.append("  CRITICAL: If user wrote something else (not 'yes'/'כן'/'ok'/'אוקיי'), set ready=false and clear history.")
+        prompt_parts.append("- For 'complete_task': Set ready=true ONLY if task is unambiguous. confidence>=0.8 only if task reference is clear.")
         prompt_parts.append("- If information is missing or ambiguous → set ready=false, confidence<0.8, and list missing_fields")
         prompt_parts.append("- Extract fields progressively from the conversation (title, priority, deadline, etc.)")
         prompt_parts.append("- NEVER set ready=true if required fields (title, priority) are missing")
@@ -1010,6 +1043,8 @@ class ChatbotService:
             - is_valid: True if deadline is either None, explicit "none", or valid ISO date
             - normalized: ISO date string or None
         """
+        from datetime import datetime, timezone
+        
         if not deadline:
             return (True, None)
         
@@ -1020,14 +1055,52 @@ class ChatbotService:
         if deadline_lower in none_keywords:
             return (True, None)
         
+        # CRITICAL: Check for old dates (e.g., 2023, 25/10/2023) - reject them as invalid
+        # This prevents using default/old dates when user didn't provide a clear date
+        # Specifically check for the problematic date 25/10/2023
+        if "2023" in deadline or "2022" in deadline or "2021" in deadline:
+            logger.warning(f"Rejecting old date: {deadline}")
+            return (False, None)
+        # CRITICAL: Specifically reject 25/10/2023 and 2023-10-25 (common default date)
+        if "25/10/2023" in deadline or "2023-10-25" in deadline or "25-10-2023" in deadline:
+            logger.warning(f"Rejecting problematic default date: {deadline}")
+            return (False, None)
+        
+        now = datetime.now(timezone.utc)
+        
         # Try to parse as ISO date
         try:
-            from datetime import datetime
             # Try ISO format
             parsed = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+            # CRITICAL: Check if date is in the past (more than 1 year ago) or too old
+            # Reject dates older than 1 year (likely default/old dates)
+            if parsed.year < now.year - 1:
+                logger.warning(f"Rejecting date too old: {deadline} (year: {parsed.year})")
+                return (False, None)
             # Return normalized ISO string
             return (True, parsed.isoformat())
         except (ValueError, AttributeError):
+            pass
+        
+        # Try to parse common date formats (DD/MM/YYYY, DD-MM-YYYY, etc.)
+        try:
+            # Try DD/MM/YYYY or DD-MM-YYYY
+            if "/" in deadline or "-" in deadline:
+                # Check if it's a date format (has numbers)
+                if any(char.isdigit() for char in deadline):
+                    # Try parsing with different formats
+                    for fmt in ["%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%Y/%m/%d"]:
+                        try:
+                            parsed = datetime.strptime(deadline.strip(), fmt)
+                            # Check if date is too old
+                            if parsed.year < now.year - 1:
+                                logger.warning(f"Rejecting date too old: {deadline} (year: {parsed.year})")
+                                return (False, None)
+                            # Return normalized ISO string
+                            return (True, parsed.isoformat())
+                        except ValueError:
+                            continue
+        except Exception:
             pass
         
         # If we can't parse, it's invalid
@@ -1158,17 +1231,57 @@ class ChatbotService:
                 missing_fields = command_dict.get("missing_fields", [])
                 
                 # Enforce required fields: title and priority for add_task/update_task
+                # CRITICAL: Check conversation history to determine which field should be asked next
                 if intent in ["add_task", "update_task"]:
-                    if not fields.get("title"):
-                        ready = False
-                        if "title" not in missing_fields:
-                            missing_fields.append("title")
-                    if not fields.get("priority"):
-                        ready = False
-                        if "priority" not in missing_fields:
-                            missing_fields.append("priority")
+                    # Check conversation history to see what was already asked/collected
+                    last_assistant_msg = None
+                    if request.conversation_history:
+                        for msg in reversed(request.conversation_history[-5:]):
+                            if msg.get("role") == "assistant":
+                                last_assistant_msg = msg.get("content", "").lower()
+                                break
+                    
+                    # For add_task: Check if fields were collected in order
+                    if intent == "add_task":
+                        # Check if title is missing
+                        if not fields.get("title"):
+                            ready = False
+                            if "title" not in missing_fields:
+                                missing_fields.append("title")
+                            # If last assistant message didn't ask for title, it should be asked first
+                            if last_assistant_msg and "title" not in last_assistant_msg and "כותרת" not in last_assistant_msg:
+                                # Title should be asked first - clear priority if it was set
+                                if fields.get("priority"):
+                                    fields["priority"] = None
+                                    if "priority" in missing_fields:
+                                        missing_fields.remove("priority")
+                        # Check if priority is missing (only if title is present)
+                        elif not fields.get("priority"):
+                            ready = False
+                            if "priority" not in missing_fields:
+                                missing_fields.append("priority")
+                            # If last assistant message didn't ask for priority, it should be asked second
+                            if last_assistant_msg and "priority" not in last_assistant_msg and "עדיפות" not in last_assistant_msg:
+                                # Priority should be asked second - clear deadline if it was set
+                                if fields.get("deadline"):
+                                    fields["deadline"] = None
+                                    if "deadline" in missing_fields:
+                                        missing_fields.remove("deadline")
+                    
+                    # For update_task: Similar logic but with confirmation step
+                    elif intent == "update_task":
+                        if not fields.get("title"):
+                            ready = False
+                            if "title" not in missing_fields:
+                                missing_fields.append("title")
+                        if not fields.get("priority"):
+                            ready = False
+                            if "priority" not in missing_fields:
+                                missing_fields.append("priority")
                     
                     # Rule 8: For update_task, check for explicit confirmation
+                    # CRITICAL: Similar to add_task deadline logic - if user didn't write "yes"/"ok"/"כן"/"אוקיי", 
+                    # don't execute and clear history (so next commands rely on DB)
                     if intent == "update_task":
                         has_confirmation = False
                         if request.conversation_history:
@@ -1179,12 +1292,16 @@ class ChatbotService:
                                     last_assistant_msg = msg.get("content", "").lower()
                                     break
                             
-                            if last_assistant_msg and ("confirm" in last_assistant_msg or "ready" in last_assistant_msg or "אישור" in last_assistant_msg or "מוכן" in last_assistant_msg):
+                            if last_assistant_msg and ("confirm" in last_assistant_msg or "ready" in last_assistant_msg or "אישור" in last_assistant_msg or "מוכן" in last_assistant_msg or "בטוח" in last_assistant_msg):
                                 # Check if user confirmed in current message
-                                message_lower = request.message.lower()
-                                confirm_keywords = ["yes", "כן", "confirm", "אשר", "ok", "אוקיי", "ready", "מוכן"]
-                                if any(keyword in message_lower for keyword in confirm_keywords):
-                                    has_confirmation = True
+                                message_lower = request.message.lower().strip()
+                                confirm_keywords = ["yes", "כן", "confirm", "אשר", "ok", "אוקיי", "ready", "מוכן", "okay"]
+                                # CRITICAL: Only accept exact confirmation keywords, not partial matches
+                                # This prevents false positives (e.g., "ok" in "look" or "כן" in "כןן")
+                                message_words = message_lower.split()
+                                has_confirmation = any(keyword in message_words for keyword in confirm_keywords) or message_lower in confirm_keywords
+                                
+                                if has_confirmation:
                                     # User confirmed - set ready=true if all other fields are present
                                     logger.debug("Update task: User confirmed, setting ready=true if fields are present")
                                     # If title and priority are present, force ready=true
@@ -1196,6 +1313,58 @@ class ChatbotService:
                                         # Remove confirmation from missing_fields if it was there
                                         if "confirmation" in missing_fields:
                                             missing_fields.remove("confirmation")
+                                else:
+                                    # User wrote something else (not "yes"/"ok"/"כן"/"אוקיי")
+                                    # Don't execute, but mark as needing history clear (will be handled by frontend)
+                                    logger.debug(f"Update task: User wrote '{request.message}' instead of confirmation. Not executing.")
+                                    ready = False
+                                    # Set intent to indicate this was a non-confirmation response
+                                    # Frontend will clear history based on this
+                                    if "confirmation" not in missing_fields:
+                                        missing_fields.append("confirmation")
+                        
+                        if not has_confirmation:
+                            # No confirmation yet - set ready=false
+                            ready = False
+                            if "confirmation" not in missing_fields:
+                                missing_fields.append("confirmation")
+                    
+                    # Rule 9: For delete_task, check for explicit confirmation (similar logic)
+                    if intent == "delete_task":
+                        has_confirmation = False
+                        if request.conversation_history:
+                            # Check last assistant message for confirmation request
+                            last_assistant_msg = None
+                            for msg in reversed(request.conversation_history[-5:]):
+                                if msg.get("role") == "assistant":
+                                    last_assistant_msg = msg.get("content", "").lower()
+                                    break
+                            
+                            if last_assistant_msg and ("confirm" in last_assistant_msg or "בטוח" in last_assistant_msg or "sure" in last_assistant_msg or "אישור" in last_assistant_msg):
+                                # Check if user confirmed in current message
+                                message_lower = request.message.lower().strip()
+                                confirm_keywords = ["yes", "כן", "confirm", "אשר", "ok", "אוקיי", "okay"]
+                                # CRITICAL: Only accept exact confirmation keywords
+                                message_words = message_lower.split()
+                                has_confirmation = any(keyword in message_words for keyword in confirm_keywords) or message_lower in confirm_keywords
+                                
+                                if has_confirmation:
+                                    # User confirmed - set ready=true
+                                    logger.debug("Delete task: User confirmed, setting ready=true")
+                                    ready = True
+                                    # Force intent to be delete_task (not potential_delete)
+                                    if intent == "potential_delete":
+                                        intent = "delete_task"
+                                    # Remove confirmation from missing_fields if it was there
+                                    if "confirmation" in missing_fields:
+                                        missing_fields.remove("confirmation")
+                                else:
+                                    # User wrote something else (not "yes"/"ok"/"כן"/"אוקיי")
+                                    # Don't execute, but mark as needing history clear
+                                    logger.debug(f"Delete task: User wrote '{request.message}' instead of confirmation. Not executing.")
+                                    ready = False
+                                    if "confirmation" not in missing_fields:
+                                        missing_fields.append("confirmation")
                         
                         if not has_confirmation:
                             # No confirmation yet - set ready=false
@@ -1204,33 +1373,86 @@ class ChatbotService:
                                 missing_fields.append("confirmation")
                     
                     # Rule 2: Deadline must be asked as LAST step (only for add_task, or update_task if confirmation already received)
-                    deadline = fields.get("deadline")
-                    if deadline is not None and deadline != "":
-                        # Rule 3: Validate deadline format and clarity
-                        is_valid, normalized = self._validate_deadline_format(deadline)
-                        is_ambiguous = self._is_deadline_ambiguous(deadline, request.conversation_history)
-                        
-                        if not is_valid or is_ambiguous:
-                            # Deadline is unclear - set ready=false and ask for numeric format
-                            ready = False
-                            if "deadline" not in missing_fields:
-                                missing_fields.append("deadline")
-                            # Update fields to None to indicate it needs clarification
-                            fields["deadline"] = None
+                    # CRITICAL: Only check deadline if priority is already present (for add_task)
+                    # Order must be: title → priority → deadline
+                    if intent == "add_task":
+                        # Only check deadline if priority is already present
+                        if fields.get("priority"):
+                            deadline = fields.get("deadline")
+                            if deadline is not None and deadline != "":
+                                # Rule 3: Validate deadline format and clarity
+                                is_valid, normalized = self._validate_deadline_format(deadline)
+                                is_ambiguous = self._is_deadline_ambiguous(deadline, request.conversation_history)
+                                
+                                # CRITICAL: Check if user explicitly said "no" or "none" (case-insensitive)
+                                deadline_lower = str(deadline).lower().strip()
+                                none_keywords = ["none", "no", "אין", "לא", "null", "skip"]
+                                is_explicit_none = deadline_lower in none_keywords
+                                
+                                if is_explicit_none:
+                                    # User explicitly said "no" or "none" - set to None
+                                    fields["deadline"] = None
+                                    # Don't set ready=false for this - deadline is optional
+                                elif not is_valid or is_ambiguous:
+                                    # Deadline is unclear or invalid (including old dates like 2023)
+                                    # Set ready=false and ask for numeric format
+                                    ready = False
+                                    if "deadline" not in missing_fields:
+                                        missing_fields.append("deadline")
+                                    # Update fields to None to indicate it needs clarification
+                                    fields["deadline"] = None
+                                    logger.warning(f"Invalid or ambiguous deadline: {deadline}. Will ask for numeric format.")
+                                    # Note: The reply will be generated by LLM based on the prompt instructions
+                                    # The prompt explicitly tells LLM to ask for numeric format if date is unclear
+                                    # The LLM should respond with: "אנא תן תאריך במספרים (למשל: 2024-01-20), או כתוב 'לא' אם אין תאריך יעד"
+                                else:
+                                    # Valid and clear - normalize it
+                                    fields["deadline"] = normalized
+                            else:
+                                # Rule 2: Check if deadline was asked as last step (only if priority is present)
+                                if not self._was_deadline_asked_last(request.conversation_history):
+                                    # Deadline wasn't asked yet - must be asked before ready
+                                    ready = False
+                                    if "deadline" not in missing_fields:
+                                        missing_fields.append("deadline")
+                        # If priority is not present, don't check deadline yet (priority must come first)
                         else:
-                            # Valid and clear - normalize it
-                            fields["deadline"] = normalized
-                    else:
-                        # Rule 2: Check if deadline was asked as last step (only for add_task, or update_task if confirmation already received)
-                        if intent == "add_task" and not self._was_deadline_asked_last(request.conversation_history):
-                            # Deadline wasn't asked yet - must be asked before ready
-                            ready = False
-                            if "deadline" not in missing_fields:
-                                missing_fields.append("deadline")
-                        elif intent == "update_task":
-                            # For update_task, deadline is optional - only check if confirmation was already received
-                            # (deadline check happens before confirmation in the flow)
-                            pass
+                            # Priority is missing - deadline should not be checked yet
+                            if "deadline" in missing_fields:
+                                missing_fields.remove("deadline")
+                            if fields.get("deadline"):
+                                # Clear deadline if it was set before priority
+                                fields["deadline"] = None
+                    elif intent == "update_task":
+                        # For update_task, deadline is optional - only check if confirmation was already received
+                        # (deadline check happens before confirmation in the flow)
+                        deadline = fields.get("deadline")
+                        if deadline is not None and deadline != "":
+                            # Rule 3: Validate deadline format and clarity
+                            is_valid, normalized = self._validate_deadline_format(deadline)
+                            is_ambiguous = self._is_deadline_ambiguous(deadline, request.conversation_history)
+                            
+                            # CRITICAL: Check if user explicitly said "no" or "none" (case-insensitive)
+                            deadline_lower = str(deadline).lower().strip()
+                            none_keywords = ["none", "no", "אין", "לא", "null", "skip"]
+                            is_explicit_none = deadline_lower in none_keywords
+                            
+                            if is_explicit_none:
+                                # User explicitly said "no" or "none" - set to None
+                                fields["deadline"] = None
+                                # Don't set ready=false for this - deadline is optional
+                            elif not is_valid or is_ambiguous:
+                                # Deadline is unclear or invalid (including old dates like 2023)
+                                # Set ready=false and ask for numeric format
+                                ready = False
+                                if "deadline" not in missing_fields:
+                                    missing_fields.append("deadline")
+                                # Update fields to None to indicate it needs clarification
+                                fields["deadline"] = None
+                                logger.warning(f"Invalid or ambiguous deadline: {deadline}. Will ask for numeric format.")
+                            else:
+                                # Valid and clear - normalize it
+                                fields["deadline"] = normalized
                 
                 # For update_task, ensure ref is set (extract from conversation if missing)
                 ref = command_dict.get("ref")
@@ -1298,6 +1520,13 @@ class ChatbotService:
         elif any(word in message_lower for word in ["create", "add", "new", "צור", "הוסף", "תוסיף"]):
             return "potential_create"
         
+        # DELETE - check phrases first (BEFORE update - more destructive, needs higher priority)
+        if any(phrase in message_lower for phrase in delete_phrases_hebrew):
+            return "potential_delete"
+        # DELETE - check single words (BEFORE update)
+        elif any(word in message_lower for word in ["delete", "remove", "מחק", "הסר", "תמחק", "תמחקי"]):
+            return "potential_delete"
+        
         # UPDATE - check phrases first
         elif any(phrase in message_lower for phrase in update_phrases_hebrew):
             return "potential_update"
@@ -1306,13 +1535,6 @@ class ChatbotService:
             return "potential_update"
         elif any(word in message_lower for word in ["complete", "done", "finish", "בוצע", "סיים", "סיימתי"]):
             return "potential_update"
-        
-        # DELETE - check phrases first
-        elif any(phrase in message_lower for phrase in delete_phrases_hebrew):
-            return "potential_delete"
-        # DELETE - check single words
-        elif any(word in message_lower for word in ["delete", "remove", "מחק", "הסר"]):
-            return "potential_delete"
         
         # Check for list tasks (after action verbs)
         # Only match if it's clearly a list query, not an action

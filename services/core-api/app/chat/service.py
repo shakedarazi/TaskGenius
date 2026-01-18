@@ -124,6 +124,36 @@ class ChatService:
                     command = Command(**command_dict)
                     chat_response.command = command
                     
+                    # CRITICAL: Update intent based on command.intent BEFORE execution
+                    # This ensures frontend can detect CRUD operations even if execution fails
+                    if command.intent in ["add_task", "update_task", "delete_task"]:
+                        # If command is ready and has high confidence, set intent to actual CRUD intent
+                        # This allows frontend to clear history even if execution fails later
+                        if command.ready and command.confidence >= 0.8:
+                            chat_response.intent = command.intent
+                        # CRITICAL: For update/delete, if user didn't confirm (wrote something else),
+                        # set intent to indicate history should be cleared (so next commands rely on DB)
+                        elif command.intent == "update_task" and not command.ready:
+                            # Check if confirmation was requested but user didn't confirm
+                            if command.missing_fields and "confirmation" in command.missing_fields:
+                                # User was asked to confirm but didn't write "yes"/"ok"
+                                # Set intent to indicate history should be cleared
+                                chat_response.intent = "update_task_cancelled"
+                            else:
+                                chat_response.intent = "potential_update"
+                        elif command.intent == "delete_task" and not command.ready:
+                            # Check if confirmation was requested but user didn't confirm
+                            if command.missing_fields and "confirmation" in command.missing_fields:
+                                # User was asked to confirm but didn't write "yes"/"ok"
+                                # Set intent to indicate history should be cleared
+                                chat_response.intent = "delete_task_cancelled"
+                            else:
+                                chat_response.intent = "potential_delete"
+                        # If command is not ready but intent is clear, keep potential_* intent
+                        # This allows frontend to continue the conversation
+                        elif command.intent == "add_task":
+                            chat_response.intent = "potential_create"
+                    
                     # Execute add_task if conditions are met
                     if command.intent == "add_task" and command.confidence >= 0.8 and command.ready:
                         if command.fields and command.fields.get("title") and command.fields.get("priority"):
@@ -182,6 +212,7 @@ class ChatService:
                                 chat_response.reply = f"✅ הוספתי משימה: '{created_task.title}'"
                             else:
                                 chat_response.reply = f"✅ Added task: '{created_task.title}'"
+                            # Intent already set above, but ensure it's create_task after successful execution
                             chat_response.intent = "create_task"
                             logger.info(f"Created task via chat: {created_task.id} for user {user_id}")
                         else:
@@ -324,6 +355,7 @@ class ChatService:
                             chat_response.reply = f"✅ עדכנתי משימה: '{updated_task.title}'"
                         else:
                             chat_response.reply = f"✅ Updated task: '{updated_task.title}'"
+                        # Intent already set above, but ensure it's update_task after successful execution
                         chat_response.intent = "update_task"
                         logger.info(f"Updated task via chat: {updated_task.id} for user {user_id}")
                     
@@ -394,6 +426,7 @@ class ChatService:
                             chat_response.reply = f"✅ מחקתי משימה: '{task.title}'"
                         else:
                             chat_response.reply = f"✅ Deleted task: '{task.title}'"
+                        # Intent already set above, but ensure it's delete_task after successful execution
                         chat_response.intent = "delete_task"
                         logger.info(f"Deleted task via chat: {task.id} for user {user_id}")
                 
