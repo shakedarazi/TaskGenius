@@ -43,72 +43,103 @@ export function TaskForm({ onSubmit, onCancel }: TaskFormProps) {
   };
 
   return (
-    <form className="task-form" onSubmit={handleSubmit}>
-      <h2>New Task</h2>
-
-      {error && <div className="error">{error}</div>}
-
-      <div className="form-group">
-        <label htmlFor="title">Title *</label>
-        <input
-          id="title"
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          required
-          disabled={loading}
-          placeholder="What needs to be done?"
-        />
+    <div className="card">
+      <div className="card-header bg-primary text-white">
+        <h2 className="h4 mb-0">New Task</h2>
       </div>
+      <div className="card-body">
+        <form onSubmit={handleSubmit}>
+          {error && (
+            <div className="alert alert-danger" role="alert">
+              {error}
+            </div>
+          )}
 
-      <div className="form-group">
-        <label htmlFor="description">Description</label>
-        <textarea
-          id="description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          disabled={loading}
-          placeholder="Add more details..."
-          rows={3}
-        />
+          <div className="mb-3">
+            <label htmlFor="title" className="form-label">Title *</label>
+            <input
+              id="title"
+              type="text"
+              className="form-control"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+              disabled={loading}
+              placeholder="What needs to be done?"
+            />
+          </div>
+
+          <div className="mb-3">
+            <label htmlFor="description" className="form-label">Description</label>
+            <textarea
+              id="description"
+              className="form-control"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              disabled={loading}
+              placeholder="Add more details..."
+              rows={3}
+            />
+          </div>
+
+          <div className="row">
+            <div className="col-md-6 mb-3">
+              <label htmlFor="priority" className="form-label">Priority</label>
+              <select
+                id="priority"
+                className="form-select"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                disabled={loading}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+
+            <div className="col-md-6 mb-3">
+              <label htmlFor="deadline" className="form-label">Due Date</label>
+              <input
+                id="deadline"
+                type="date"
+                className="form-control"
+                value={deadline}
+                onChange={(e) => setDeadline(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+          </div>
+
+          <div className="d-flex gap-2 justify-content-end">
+            <button 
+              type="button" 
+              className="btn btn-outline-secondary"
+              onClick={onCancel} 
+              disabled={loading}
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-plus-lg me-1"></i>Create Task
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
-
-      <div className="form-row">
-        <div className="form-group">
-          <label htmlFor="priority">Priority</label>
-          <select
-            id="priority"
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as TaskPriority)}
-            disabled={loading}
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="urgent">Urgent</option>
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor="deadline">Due Date</label>
-          <input
-            id="deadline"
-            type="date"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            disabled={loading}
-          />
-        </div>
-      </div>
-
-      <div className="form-actions">
-        <button type="button" onClick={onCancel} disabled={loading}>
-          Cancel
-        </button>
-        <button type="submit" disabled={loading}>
-          {loading ? 'Creating...' : 'Create Task'}
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }

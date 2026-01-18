@@ -1,0 +1,383 @@
+/* TASKGENIUS Theme - Navy/Light-Blue */
+
+:root {
+  /* Navy/Light-Blue Theme Colors */
+  --theme-navy-primary: #1a365d;
+  --theme-navy-dark: #0f2027;
+  --theme-light-blue: #4a90e2;
+  --theme-light-blue-light: #6ba3e8;
+  --theme-background: #f0f4f8;
+  --theme-surface: #ffffff;
+  --theme-text: #1a202c;
+  --theme-text-secondary: #718096;
+  --theme-error: #e53e3e;
+  --theme-success: #38a169;
+  
+  /* Priority Colors (Red gradient for urgency) */
+  --priority-low: #48bb78;
+  --priority-medium: #ed8936;
+  --priority-high: #f56565;
+  --priority-urgent: #c53030;
+  
+  /* Override Bootstrap primary color */
+  --bs-primary: var(--theme-navy-primary);
+  --bs-primary-rgb: 26, 54, 93;
+  --bs-primary-bg-subtle: #e6f0f8;
+  --bs-primary-border-subtle: #b3d4f0;
+  --bs-primary-text-emphasis: #0f2027;
+  
+  /* Override Bootstrap secondary (use light-blue) */
+  --bs-secondary: var(--theme-light-blue);
+  --bs-secondary-rgb: 74, 144, 226;
+  
+  /* Background */
+  --bs-body-bg: var(--theme-background);
+  --bs-body-color: var(--theme-text);
+  
+  /* Border radius */
+  --bs-border-radius: 8px;
+  --bs-border-radius-sm: 4px;
+  --bs-border-radius-lg: 12px;
+  
+  /* Shadows */
+  --bs-box-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --bs-box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --bs-box-shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+}
+
+/* RTL Support */
+[dir="rtl"] {
+  direction: rtl;
+  text-align: right;
+}
+
+[dir="rtl"] .table {
+  text-align: right;
+}
+
+[dir="rtl"] .card {
+  text-align: right;
+}
+
+/* Priority Badge Colors */
+.badge-priority-low {
+  background-color: var(--priority-low);
+  color: white;
+}
+
+.badge-priority-medium {
+  background-color: var(--priority-medium);
+  color: white;
+}
+
+.badge-priority-high {
+  background-color: var(--priority-high);
+  color: white;
+}
+
+.badge-priority-urgent {
+  background-color: var(--priority-urgent);
+  color: white;
+}
+
+/* Priority Border Colors */
+.border-priority-low {
+  border-left-color: var(--priority-low) !important;
+}
+
+.border-priority-medium {
+  border-left-color: var(--priority-medium) !important;
+}
+
+.border-priority-high {
+  border-left-color: var(--priority-high) !important;
+}
+
+.border-priority-urgent {
+  border-left-color: var(--priority-urgent) !important;
+}
+
+[dir="rtl"] .border-priority-low,
+[dir="rtl"] .border-priority-medium,
+[dir="rtl"] .border-priority-high,
+[dir="rtl"] .border-priority-urgent {
+  border-left: none !important;
+  border-right: 4px solid !important;
+}
+
+/* Smooth Transitions */
+.btn {
+  transition: all 0.2s ease;
+}
+
+.card {
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.card:hover {
+  box-shadow: var(--bs-box-shadow-lg);
+  transform: translateY(-2px);
+}
+
+/* Smooth Transitions for Task List */
+.table tbody tr {
+  transition: background-color 0.2s ease, opacity 0.3s ease, transform 0.3s ease;
+  animation: slideInRow 0.4s ease-out;
+}
+
+.table tbody tr:hover {
+  transform: translateX(2px);
+  background-color: rgba(0, 0, 0, 0.02);
+}
+
+/* Prevent layout shift during updates */
+.table tbody tr,
+.task-card {
+  will-change: opacity, transform;
+}
+
+/* Task Cards Animation */
+.task-card {
+  animation: slideInCard 0.4s ease-out;
+  transition: opacity 0.3s ease, transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.task-card:hover {
+  transform: translateY(-2px);
+}
+
+/* Fade in animation for new tasks */
+@keyframes slideInRow {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInCard {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Smooth fade out for deleted tasks */
+.task-item-removing {
+  animation: fadeOut 0.3s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+    max-height: 0;
+    margin: 0;
+    padding: 0;
+  }
+}
+
+/* Smooth updates for task changes */
+.task-item-updating {
+  transition: all 0.3s ease;
+}
+
+/* Loading states with smooth transitions */
+.btn-loading {
+  position: relative;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.btn-loading::after {
+  content: '';
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  top: 50%;
+  left: 50%;
+  margin-left: -7px;
+  margin-top: -7px;
+  border: 2px solid transparent;
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Smooth transitions for form appearance */
+.task-form-container {
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Smooth refresh button animation */
+.btn-refresh {
+  transition: transform 0.3s ease;
+}
+
+.btn-refresh:hover {
+  transform: rotate(180deg);
+}
+
+.btn-refresh:active {
+  transform: rotate(360deg);
+}
+
+/* Modal Animations and Backdrop Blur */
+.modal.fade.show {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.modal-dialog {
+  animation: slideIn 0.3s ease-out;
+}
+
+.modal-backdrop.fade.show {
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  animation: fadeIn 0.3s ease-out;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateY(-30px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* Ensure modal is above everything */
+.modal.show {
+  z-index: 1055;
+}
+
+.modal-backdrop.show {
+  z-index: 1050;
+}
+
+/* Prevent body scroll when modal is open */
+body.modal-open {
+  overflow: hidden;
+}
+
+/* Focus States for Accessibility */
+.btn:focus-visible,
+.form-control:focus-visible,
+.form-select:focus-visible {
+  outline: 2px solid var(--theme-light-blue);
+  outline-offset: 2px;
+}
+
+/* Mobile Card Styles */
+@media (max-width: 767.98px) {
+  .task-card {
+    border-left: 4px solid;
+    margin-bottom: 1rem;
+  }
+  
+  .task-card.priority-low {
+    border-left-color: var(--priority-low);
+  }
+  
+  .task-card.priority-medium {
+    border-left-color: var(--priority-medium);
+  }
+  
+  .task-card.priority-high {
+    border-left-color: var(--priority-high);
+  }
+  
+  .task-card.priority-urgent {
+    border-left-color: var(--priority-urgent);
+  }
+  
+  [dir="rtl"] .task-card {
+    border-left: none;
+    border-right: 4px solid;
+  }
+}
+
+/* Desktop Table Styles */
+@media (min-width: 768px) {
+  .table tbody tr {
+    border-left: 4px solid transparent;
+  }
+  
+  .table tbody tr.priority-low {
+    border-left-color: var(--priority-low);
+  }
+  
+  .table tbody tr.priority-medium {
+    border-left-color: var(--priority-medium);
+  }
+  
+  .table tbody tr.priority-high {
+    border-left-color: var(--priority-high);
+  }
+  
+  .table tbody tr.priority-urgent {
+    border-left-color: var(--priority-urgent);
+  }
+  
+  [dir="rtl"] .table tbody tr {
+    border-left: none;
+    border-right: 4px solid;
+  }
+  
+  [dir="rtl"] .table tbody tr.priority-low {
+    border-right-color: var(--priority-low);
+  }
+  
+  [dir="rtl"] .table tbody tr.priority-medium {
+    border-right-color: var(--priority-medium);
+  }
+  
+  [dir="rtl"] .table tbody tr.priority-high {
+    border-right-color: var(--priority-high);
+  }
+  
+  [dir="rtl"] .table tbody tr.priority-urgent {
+    border-right-color: var(--priority-urgent);
+  }
+}

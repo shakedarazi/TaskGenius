@@ -55,70 +55,107 @@ export function TaskEditForm({ task, onUpdated, onCancel }: TaskEditFormProps) {
   };
 
   return (
-    <form className="task-form task-edit-form" onSubmit={handleSubmit}>
-      <h2>Edit Task</h2>
-
-      {error && <div className="error">{error}</div>}
-
-      <div className="form-group">
-        <label htmlFor={`edit-title-${task.id}`}>Title *</label>
-        <input
-          id={`edit-title-${task.id}`}
-          type="text"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          required
-          disabled={loading}
-        />
+    <>
+      <div className="modal-header bg-primary text-white">
+        <h2 className="modal-title h5" id="editTaskModalLabel">Edit Task</h2>
+        <button 
+          type="button" 
+          className="btn-close btn-close-white" 
+          onClick={onCancel}
+          aria-label="Close"
+        ></button>
       </div>
+      <div className="modal-body">
+        <form onSubmit={handleSubmit}>
+          {error && (
+            <div className="alert alert-danger" role="alert">
+              {error}
+            </div>
+          )}
 
-      <div className="form-group">
-        <label htmlFor={`edit-description-${task.id}`}>Description</label>
-        <textarea
-          id={`edit-description-${task.id}`}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          disabled={loading}
-          rows={3}
-        />
+          <div className="mb-3">
+            <label htmlFor={`edit-title-${task.id}`} className="form-label">Title *</label>
+            <input
+              id={`edit-title-${task.id}`}
+              type="text"
+              className="form-control"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              required
+              disabled={loading}
+            />
+          </div>
+
+          <div className="mb-3">
+            <label htmlFor={`edit-description-${task.id}`} className="form-label">Description</label>
+            <textarea
+              id={`edit-description-${task.id}`}
+              className="form-control"
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              disabled={loading}
+              rows={3}
+            />
+          </div>
+
+          <div className="row">
+            <div className="col-md-6 mb-3">
+              <label htmlFor={`edit-priority-${task.id}`} className="form-label">Priority</label>
+              <select
+                id={`edit-priority-${task.id}`}
+                className="form-select"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value as TaskPriority)}
+                disabled={loading}
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+
+            <div className="col-md-6 mb-3">
+              <label htmlFor={`edit-deadline-${task.id}`} className="form-label">Due Date</label>
+              <input
+                id={`edit-deadline-${task.id}`}
+                type="date"
+                className="form-control"
+                value={deadline}
+                onChange={(e) => setDeadline(e.target.value)}
+                disabled={loading}
+              />
+            </div>
+          </div>
+
+          <div className="modal-footer">
+            <button 
+              type="button" 
+              className="btn btn-outline-secondary"
+              onClick={onCancel} 
+              disabled={loading}
+            >
+              Cancel
+            </button>
+            <button 
+              type="submit" 
+              className="btn btn-primary"
+              disabled={loading}
+            >
+              {loading ? (
+                <>
+                  <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-check-lg me-1"></i>Save Changes
+                </>
+              )}
+            </button>
+          </div>
+        </form>
       </div>
-
-      <div className="form-row">
-        <div className="form-group">
-          <label htmlFor={`edit-priority-${task.id}`}>Priority</label>
-          <select
-            id={`edit-priority-${task.id}`}
-            value={priority}
-            onChange={(e) => setPriority(e.target.value as TaskPriority)}
-            disabled={loading}
-          >
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-            <option value="urgent">Urgent</option>
-          </select>
-        </div>
-
-        <div className="form-group">
-          <label htmlFor={`edit-deadline-${task.id}`}>Due Date</label>
-          <input
-            id={`edit-deadline-${task.id}`}
-            type="date"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-            disabled={loading}
-          />
-        </div>
-      </div>
-
-      <div className="form-actions">
-        <button type="button" onClick={onCancel} disabled={loading}>
-          Cancel
-        </button>
-        <button type="submit" disabled={loading}>
-          {loading ? 'Saving...' : 'Save Changes'}
-        </button>
-      </div>
-    </form>
+    </>
   );
 }

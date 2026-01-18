@@ -38,12 +38,21 @@ interface ChatWidgetProps {
 const CHAT_HISTORY_KEY = 'taskgenius_chat_history';
 const CHAT_HISTORY_EXPIRY_DAYS = 7; // Keep history for 7 days
 
+interface StoredChatMessage {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    timestamp: string; // ISO string for storage
+    intent?: string;
+    suggestions?: string[];
+}
+
 interface StoredChatHistory {
-    messages: ChatMessage[];
+    messages: StoredChatMessage[];
     timestamp: number;
 }
 
-export function ChatWidget({ onTaskCreated }: ChatWidgetProps) {
+export function ChatWidget({ onTaskCreated: _onTaskCreated }: ChatWidgetProps) {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState('');

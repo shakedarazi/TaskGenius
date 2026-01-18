@@ -13,7 +13,6 @@
 
 import { apiClient } from './client';
 import type {
-    ChatMessage,
     ChatRequest,
     ChatResponse,
     ChatHistory
