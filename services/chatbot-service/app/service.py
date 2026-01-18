@@ -415,7 +415,24 @@ class ChatbotService:
                     ]
                     reply = replies[hash(request.user_id + request.message) % len(replies)]
             else:
-                # Task identified, now need title and priority
+                # Task identified
+                # Rule 8: Check for confirmation
+                has_confirmation = False
+                if request.conversation_history:
+                    for msg in request.conversation_history[-3:]:
+                        content_lower = msg.get("content", "").lower()
+                        role = msg.get("role", "")
+                        if role == "assistant":
+                            # Check if confirmation was requested
+                            if "אישור" in content_lower or "confirm" in content_lower or "מוכן" in content_lower or "ready" in content_lower:
+                                # Next user message should be confirmation
+                                pass
+                        elif role == "user":
+                            # Check if user confirmed
+                            confirm_keywords = ["כן", "yes", "אשר", "confirm", "מוכן", "ok", "אוקיי", "ready"]
+                            if any(keyword in content_lower for keyword in confirm_keywords):
+                                has_confirmation = True
+                
                 # Check conversation history for collected fields
                 has_title = False
                 has_priority = False
@@ -455,9 +472,18 @@ class ChatbotService:
                         "נהדר! האם יש תאריך יעד חדש? (אם לא, תגיד 'אין')"
                     ]
                     reply = replies[hash(request.user_id + request.message) % len(replies)]
+                elif not has_confirmation:
+                    # Rule 8: Final step - ask for confirmation
+                    replies = [
+                        "מעולה! אני מוכן לעדכן את המשימה. האם אתה מוכן? (כן/לא)",
+                        "טוב! אני מוכן לעדכן. האם אתה מוכן? (כן/לא)",
+                        "נהדר! אני מוכן לעדכן את המשימה. האם אתה מוכן? (כן/לא)"
+                    ]
+                    reply = replies[hash(request.user_id + request.message) % len(replies)]
                 else:
-                    reply = "מעולה! אני מוכן לעדכן את המשימה. האם אתה מוכן?"
-            suggestions = ["שנה עדיפות", "שנה תאריך יעד", "שנה סטטוס"]
+                    # Confirmation received - this should trigger LLM to set ready=true
+                    reply = "מעולה! אני מעדכן את המשימה עכשיו..."
+            suggestions = ["שנה עדיפות", "שנה תאריך יעד", "שנה סטטוס"] if not has_confirmation else []
         else:
             if not task_mentioned:
                 if len(request.tasks) == 1:
@@ -476,7 +502,24 @@ class ChatbotService:
                     ]
                     reply = replies[hash(request.user_id + request.message) % len(replies)]
             else:
-                # Task identified, now need title and priority
+                # Task identified
+                # Rule 8: Check for confirmation
+                has_confirmation = False
+                if request.conversation_history:
+                    for msg in request.conversation_history[-3:]:
+                        content_lower = msg.get("content", "").lower()
+                        role = msg.get("role", "")
+                        if role == "assistant":
+                            # Check if confirmation was requested
+                            if "confirm" in content_lower or "ready" in content_lower:
+                                # Next user message should be confirmation
+                                pass
+                        elif role == "user":
+                            # Check if user confirmed
+                            confirm_keywords = ["yes", "confirm", "ok", "okay", "ready"]
+                            if any(keyword in content_lower for keyword in confirm_keywords):
+                                has_confirmation = True
+                
                 # Check conversation history for collected fields
                 has_title = False
                 has_priority = False
@@ -516,9 +559,18 @@ class ChatbotService:
                         "Perfect! Is there a new deadline? (If not, say 'none')"
                     ]
                     reply = replies[hash(request.user_id + request.message) % len(replies)]
+                elif not has_confirmation:
+                    # Rule 8: Final step - ask for confirmation
+                    replies = [
+                        "Great! I'm ready to update the task. Are you ready? (yes/no)",
+                        "Perfect! I'm ready to update. Are you ready? (yes/no)",
+                        "Excellent! I'm ready to update the task. Are you ready? (yes/no)"
+                    ]
+                    reply = replies[hash(request.user_id + request.message) % len(replies)]
                 else:
-                    reply = "Great! I'm ready to update the task. Are you ready?"
-            suggestions = ["Change priority", "Change deadline", "Change status"]
+                    # Confirmation received - this should trigger LLM to set ready=true
+                    reply = "Great! I'm updating the task now..."
+            suggestions = ["Change priority", "Change deadline", "Change status"] if not has_confirmation else []
         
         return ChatResponse(
             reply=reply,
@@ -829,9 +881,18 @@ class ChatbotService:
         prompt_parts.append("- For 'add_task': Set ready=true ONLY if BOTH title AND priority are provided. confidence>=0.8 only if both are clear.")
         prompt_parts.append("  REQUIRED FIELDS for add_task: title (mandatory), priority (mandatory), deadline (optional - ask but can be null)")
         prompt_parts.append("  WORKFLOW: 1) Ask for title → 2) Ask for priority → 3) Ask for deadline (can skip or ask for numeric format if unclear) → 4) Execute when title+priority are ready")
-        prompt_parts.append("- For 'update_task': Set ready=true ONLY if task is unambiguous AND title AND priority are provided/confirmed.")
-        prompt_parts.append("  REQUIRED FIELDS for update_task: task reference (mandatory), title (mandatory), priority (mandatory), deadline (optional - ask but can be null)")
-        prompt_parts.append("  WORKFLOW: 1) Identify task → 2) Ask for title (or confirm existing) → 3) Ask for priority → 4) Ask for deadline (can skip) → 5) Execute")
+        prompt_parts.append("- For 'update_task': Set ready=true ONLY if task is unambiguous AND title AND priority are provided/confirmed AND user explicitly confirmed (said 'yes'/'כן'/'confirm').")
+        prompt_parts.append("  REQUIRED FIELDS for update_task:")
+        prompt_parts.append("    - ref.task_id OR ref.title (mandatory - must identify which task to update)")
+        prompt_parts.append("    - fields.title (mandatory - new title)")
+        prompt_parts.append("    - fields.priority (mandatory - new priority)")
+        prompt_parts.append("    - fields.deadline (optional - ask but can be null)")
+        prompt_parts.append("  WORKFLOW: 1) Identify task → 2) Ask for title (or confirm existing) → 3) Ask for priority → 4) Ask for deadline (can skip) → 5) Ask for confirmation → 6) Execute ONLY after explicit confirmation")
+        prompt_parts.append("  CRITICAL: If the assistant asked 'Are you ready?' or 'Confirm update?' and user replied 'yes'/'כן'/'confirm', then:")
+        prompt_parts.append("    - Set intent='update_task' (NOT 'potential_update')")
+        prompt_parts.append("    - Set ready=true")
+        prompt_parts.append("    - Set ref.task_id or ref.title to identify the task")
+        prompt_parts.append("    - Set fields.title and fields.priority with the new values")
         prompt_parts.append("- For 'delete_task'/'complete_task': Set ready=true ONLY if task is unambiguous. confidence>=0.8 only if task reference is clear.")
         prompt_parts.append("- If information is missing or ambiguous → set ready=false, confidence<0.8, and list missing_fields")
         prompt_parts.append("- Extract fields progressively from the conversation (title, priority, deadline, etc.)")
@@ -1107,7 +1168,42 @@ class ChatbotService:
                         if "priority" not in missing_fields:
                             missing_fields.append("priority")
                     
-                    # Rule 2: Deadline must be asked as LAST step
+                    # Rule 8: For update_task, check for explicit confirmation
+                    if intent == "update_task":
+                        has_confirmation = False
+                        if request.conversation_history:
+                            # Check last assistant message for confirmation request
+                            last_assistant_msg = None
+                            for msg in reversed(request.conversation_history[-5:]):
+                                if msg.get("role") == "assistant":
+                                    last_assistant_msg = msg.get("content", "").lower()
+                                    break
+                            
+                            if last_assistant_msg and ("confirm" in last_assistant_msg or "ready" in last_assistant_msg or "אישור" in last_assistant_msg or "מוכן" in last_assistant_msg):
+                                # Check if user confirmed in current message
+                                message_lower = request.message.lower()
+                                confirm_keywords = ["yes", "כן", "confirm", "אשר", "ok", "אוקיי", "ready", "מוכן"]
+                                if any(keyword in message_lower for keyword in confirm_keywords):
+                                    has_confirmation = True
+                                    # User confirmed - set ready=true if all other fields are present
+                                    logger.debug("Update task: User confirmed, setting ready=true if fields are present")
+                                    # If title and priority are present, force ready=true
+                                    if fields.get("title") and fields.get("priority"):
+                                        ready = True
+                                        # Force intent to be update_task (not potential_update)
+                                        if intent == "potential_update":
+                                            intent = "update_task"
+                                        # Remove confirmation from missing_fields if it was there
+                                        if "confirmation" in missing_fields:
+                                            missing_fields.remove("confirmation")
+                        
+                        if not has_confirmation:
+                            # No confirmation yet - set ready=false
+                            ready = False
+                            if "confirmation" not in missing_fields:
+                                missing_fields.append("confirmation")
+                    
+                    # Rule 2: Deadline must be asked as LAST step (only for add_task, or update_task if confirmation already received)
                     deadline = fields.get("deadline")
                     if deadline is not None and deadline != "":
                         # Rule 3: Validate deadline format and clarity
@@ -1125,19 +1221,40 @@ class ChatbotService:
                             # Valid and clear - normalize it
                             fields["deadline"] = normalized
                     else:
-                        # Rule 2: Check if deadline was asked as last step
-                        if not self._was_deadline_asked_last(request.conversation_history):
+                        # Rule 2: Check if deadline was asked as last step (only for add_task, or update_task if confirmation already received)
+                        if intent == "add_task" and not self._was_deadline_asked_last(request.conversation_history):
                             # Deadline wasn't asked yet - must be asked before ready
                             ready = False
                             if "deadline" not in missing_fields:
                                 missing_fields.append("deadline")
+                        elif intent == "update_task":
+                            # For update_task, deadline is optional - only check if confirmation was already received
+                            # (deadline check happens before confirmation in the flow)
+                            pass
+                
+                # For update_task, ensure ref is set (extract from conversation if missing)
+                ref = command_dict.get("ref")
+                if intent == "update_task" and not ref:
+                    # Try to extract task reference from conversation history
+                    if request.conversation_history and request.tasks:
+                        # Look for task title in recent messages
+                        for msg in reversed(request.conversation_history[-10:]):
+                            content = msg.get("content", "")
+                            for task in request.tasks:
+                                task_title = task.get("title", "")
+                                if task_title and task_title.lower() in content.lower():
+                                    ref = {"task_id": task.get("id"), "title": task_title}
+                                    logger.debug(f"Extracted task ref from conversation: {ref}")
+                                    break
+                            if ref:
+                                break
                 
                 # Create Command object
                 command = Command(
                     intent=intent,
                     confidence=confidence,
                     fields=fields,
-                    ref=command_dict.get("ref"),
+                    ref=ref,
                     filter=command_dict.get("filter"),
                     ready=ready,
                     missing_fields=missing_fields if missing_fields else None
