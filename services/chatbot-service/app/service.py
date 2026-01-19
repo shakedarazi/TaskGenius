@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Chatbot Service - Service
-
-Business logic for generating conversational responses.
-This is a read-only facade - no mutations or DB access.
-"""
 
 import logging
 import json
