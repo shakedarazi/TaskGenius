@@ -1,21 +1,6 @@
 /**
  * ChatWidget
- * 
- * Purpose: Floating chat interface for conversational task management
- * 
- * Responsibilities:
- * - Display collapsible chat panel
- * - Show chat message history (last N messages)
- * - Accept user input and send to core-api (via chatApi)
- * - Display AI responses with suggestions
- * - Maintain conversation history in memory
- * 
- * API: chatApi.sendMessage()
- * 
- * ARCHITECTURE NOTE:
- * - Messages go to core-api, which orchestrates with chatbot-service internally
- * - Client NEVER communicates directly with chatbot-service
- * - core-api executes any task mutations and returns results
+
  */
 
 import { useState, useRef, useEffect, type FormEvent } from 'react';
