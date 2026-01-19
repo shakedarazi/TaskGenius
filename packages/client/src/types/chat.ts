@@ -27,7 +27,7 @@ export interface ChatMessage {
     content: string;
     timestamp: string;
     /** Detected intent (for assistant messages) */
-    intent?: ChatIntent;
+    intent?: string;
     /** Actions that were executed (for assistant messages) */
     actions?: ChatAction[];
 }
@@ -54,13 +54,21 @@ export interface ChatRequest {
     conversation_history?: Array<{ role: 'user' | 'assistant'; content: string }>;
 }
 
-/**
- * Chat response from core-api
- */
+export interface Command {
+    intent: string;                 // add_task|update_task|delete_task|complete_task|list_tasks|clarify
+    confidence: number;             // 0.0-1.0
+    fields?: Record<string, any> | null;
+    ref?: Record<string, any> | null;
+    filter?: Record<string, any> | null;
+    ready: boolean;
+    missing_fields?: string[] | null;
+}
+
 export interface ChatResponse {
     reply: string;
     intent?: string;
     suggestions?: string[];
+    command?: Command | null;       // <-- add this
 }
 
 /**

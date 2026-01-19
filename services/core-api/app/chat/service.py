@@ -100,6 +100,9 @@ class ChatService:
             chatbot_request["conversation_history"] = conversation_history
         
         # Call chatbot-service
+        tasks_count = len(tasks_data) if tasks_data else 0
+        conversation_history_count = len(conversation_history) if conversation_history else 0
+        logger.info(f"Calling chatbot-service: user_id={user_id}, tasks_count={tasks_count}, conversation_history_count={conversation_history_count}")
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(

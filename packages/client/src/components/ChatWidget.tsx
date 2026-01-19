@@ -144,7 +144,7 @@ export function ChatWidget({ onTaskCreated: _onTaskCreated }: ChatWidgetProps) {
         try {
             // Prepare conversation history (last 10 messages, excluding current)
             // Format: [{role: 'user'|'assistant', content: '...'}]
-            const historyForApi = messages.slice(-10).map(msg => ({
+            const historyForApi = [...messages, userMessage].slice(-10).map(msg => ({
                 role: msg.role,
                 content: msg.content
             }));
@@ -163,29 +163,33 @@ export function ChatWidget({ onTaskCreated: _onTaskCreated }: ChatWidgetProps) {
                 suggestions: response.suggestions,
             };
 
-            setMessages((prev) => [...prev, assistantMessage]);
-
-            // Keep only last 50 messages in memory
-            setMessages((prev) => prev.slice(-50));
+            setMessages((prev) => [...prev, assistantMessage].slice(-50));
             
-            // Trigger refresh if a task was created/updated/deleted
-            // Check intent to determine if a task mutation occurred
-            // CRITICAL: Also clear history if update/delete was cancelled (user didn't confirm)
-            // This ensures next commands rely on DB, not conversation history
-            if (response.intent === 'create_task' || response.intent === 'update_task' || response.intent === 'delete_task' ||
-                response.intent === 'update_task_cancelled' || response.intent === 'delete_task_cancelled') {
-                // Rule 4, 5: Clear chat history after CRUD (hard reset)
-                // Also clear if update/delete was cancelled (user didn't write "yes"/"ok")
+            // Trigger refresh ONLY when a mutation was actually executed.
+            // Clear history on "cancelled" as well, but do NOT dispatch taskMutated on cancel.
+            const cmd = response.command;
+            const mutationIntents = new Set(['add_task', 'update_task', 'delete_task']);
+            const cancelIntents = new Set(['update_task_cancelled', 'delete_task_cancelled', 'create_task_cancelled']);
+
+            const cmdIntent = cmd?.intent;
+            const didMutate = Boolean(cmd && cmd.ready && cmdIntent && mutationIntents.has(cmdIntent));
+            const didCancel = Boolean(cmdIntent && cancelIntents.has(cmdIntent));
+
+            if (didMutate) {
                 setMessages([]);
                 localStorage.removeItem(CHAT_HISTORY_KEY);
-                
-                // Dispatch custom event to notify TasksPage to refresh (only if actually executed)
-                if (response.intent === 'create_task' || response.intent === 'update_task' || response.intent === 'delete_task') {
-                    window.dispatchEvent(new CustomEvent('taskMutated', { 
-                        detail: { intent: response.intent } 
-                    }));
-                }
+            
+                window.dispatchEvent(new CustomEvent('taskMutated', { detail: { intent: cmdIntent } }));
+                return;
             }
+
+            if (didCancel) {
+                setMessages([]);
+                localStorage.removeItem(CHAT_HISTORY_KEY);
+                return;
+            }
+
+
         } catch (err) {
             const errorMessage: ChatMessage = {
                 id: `error-${Date.now()}`,

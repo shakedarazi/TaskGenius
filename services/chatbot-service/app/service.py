@@ -50,6 +50,14 @@ class ChatbotService:
         """Set LLM client (for dependency injection in tests)."""
         self._llm_client = client
 
+    def _normalize_confirmation_text(self, text: str) -> List[str]:
+        if not text:
+            return []
+        s = text.strip().lower()
+        s = re.sub(r"[^\w\u0590-\u05FF\s]", " ", s)  # remove punctuation, keep hebrew/english
+        s = re.sub(r"\s+", " ", s).strip()
+        return s.split(" ") if s else []
+
     async def generate_response(self, request: ChatRequest) -> ChatResponse:
         """
         Generate a conversational response based on user message and context.
@@ -115,14 +123,20 @@ class ChatbotService:
             return None
         
         # Scan from newest to oldest (reverse order)
-        state_marker_pattern = r'\[\[STATE:[^\]]+\]\]'
+        state_marker_pattern = r'\[\[STATE[^\]]+\]\]'
         for msg in reversed(conversation_history):
+            # Primary: assistant role
+            content = msg.get("content", "")
             if msg.get("role") == "assistant":
-                content = msg.get("content", "")
                 markers = re.findall(state_marker_pattern, content)
                 if markers:
-                    # Return the last marker found (should be only one per message)
                     return markers[-1]
+
+            # Defensive: if upstream mislabeled role but marker is present, do not drop active flow
+            markers = re.findall(state_marker_pattern, content)
+            if markers:
+                return markers[-1]
+
         
         return None
 
@@ -153,7 +167,7 @@ class ChatbotService:
                 return self._handle_potential_delete(request, is_hebrew)
             elif ":UPDATE:" in last_state_marker:
                 # Continue UPDATE flow
-                return self._handle_potential_update(request, is_hebrew)
+                return self._handle_update_task(request, is_hebrew)
             else:
                 # Unknown flow type - fallback to general handler
                 logger.warning(f"Unknown flow type in state marker: {last_state_marker}")
@@ -174,9 +188,9 @@ class ChatbotService:
             return self._handle_potential_delete(request, is_hebrew)
         # Check for update/complete intents (less destructive than delete)
         elif any(word in message_lower for word in ["update", "change", "modify", "edit", "עדכן", "שנה", "ערוך"]):
-            return self._handle_potential_update(request, is_hebrew)
+            return self._handle_update_task(request, is_hebrew)
         elif any(word in message_lower for word in ["complete", "done", "finish", "בוצע", "סיים", "סיימתי"]):
-            return self._handle_potential_update(request, is_hebrew)
+            return self._handle_update_task(request, is_hebrew)
         
         # Check for create/add intent BEFORE list_tasks (to prevent Hebrew create phrases from being misrouted)
         # Hebrew create detection: requires both create verb AND "משימה"
@@ -567,304 +581,867 @@ class ChatbotService:
             suggestions=suggestions
         )
 
-    def _handle_potential_update(self, request: ChatRequest, is_hebrew: bool = False) -> ChatResponse:
-        """Handle potential update task intent - asks for clarification."""
-        # Initialize has_confirmation at the start to avoid UnboundLocalError
-        has_confirmation = False
+    def _handle_update_task(self, request: ChatRequest, is_hebrew: bool = False) -> ChatResponse:
+        """
+        Phase 3: Handle update_task FSM with deterministic state markers.
         
-        if not request.tasks:
+        FSM Flow: INITIAL → IDENTIFY_TASK → [SELECT_TASK] → ASK_FIELD → ASK_VALUE → ASK_CONFIRMATION → READY
+        State inference from conversation_history (last marker wins).
+        """
+        if not request.tasks or len(request.tasks) == 0:
             if is_hebrew:
                 reply = "אין לך משימות לעדכן."
-                suggestions = ["צור משימה", "ראה את כל המשימות"]
             else:
                 reply = "You don't have any tasks to update."
-                suggestions = ["Create a task", "View all tasks"]
             return ChatResponse(
                 reply=reply,
-                intent="potential_update",
-                suggestions=suggestions
+                intent="clarify",
+                suggestions=[],
+                command=Command(
+                    intent="clarify",
+                    confidence=0.7,
+                    ready=False,
+                    missing_fields=["task_selection"]
+                )
             )
         
-        # Check if task is specified
-        message_lower = request.message.lower()
-        task_titles = [t.get("title", "").lower() for t in request.tasks]
-        task_mentioned = any(title in message_lower for title in task_titles if title)
+         # PHASE 3: State inference from conversation_history (deterministic)
+        # Get last active state marker (if any) by scanning from newest to oldest
+        current_state = None
+        current_field = None
+        if request.conversation_history:
+            # Scan from newest to oldest
+            for msg in reversed(request.conversation_history):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if "[[STATE:UPDATE:ASK_CONFIRMATION]]" in content:
+                        current_state = "ASK_CONFIRMATION"
+                        break
+                    elif "[[STATE:UPDATE:ASK_VALUE:" in content:
+                        # Extract field name from marker (e.g., "[[STATE:UPDATE:ASK_VALUE:priority]]")
+                        match = re.search(r'\[\[STATE:UPDATE:ASK_VALUE:(\w+)\]\]', content)
+                        if match:
+                            current_field = match.group(1)
+                            current_state = "ASK_VALUE"
+                            break
+                    elif "[[STATE:UPDATE:ASK_FIELD]]" in content:
+                        current_state = "ASK_FIELD"
+                        break
+                    elif "[[STATE:UPDATE:SELECT_TASK]]" in content:
+                        current_state = "SELECT_TASK"
+                        break
+                    elif "[[STATE:UPDATE:IDENTIFY_TASK]]" in content:
+                        current_state = "IDENTIFY_TASK"
+                        break
         
-        if is_hebrew:
-            if not task_mentioned:
-                if len(request.tasks) == 1:
-                    replies = [
-                        f"אני מבין שאתה רוצה לעדכן משימה. האם אתה מתכוון ל'{request.tasks[0].get('title', 'המשימה')}'?",
-                        f"בוא נעדכן משימה! האם זו '{request.tasks[0].get('title', 'המשימה')}' שאתה רוצה לשנות?",
-                        f"אני יכול לעזור לך לעדכן. האם '{request.tasks[0].get('title', 'המשימה')}' היא המשימה?"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+        # If no state marker found, start at IDENTIFY_TASK
+        if current_state is None:
+            current_state = "IDENTIFY_TASK"
+        
+        # Initialize command fields
+        ref = None
+        fields = {}
+        missing_fields = []
+        ready = False
+        confidence = 0.7
+        command_intent = "update_task"
+        
+        # PHASE 3: State machine logic (deterministic)
+        if current_state == "IDENTIFY_TASK":
+            # IDENTIFY_TASK state: Match by task_id or normalized title
+            matches = self._find_tasks_by_id_or_title(request.tasks, request.message)
+            
+            if len(matches) == 0:
+                # No match - ask user to specify which task
+                if is_hebrew:
+                    reply = f"איזו משימה תרצה לעדכן? יש לך {len(request.tasks)} משימות. אנא ציין את שם המשימה."
                 else:
-                    task_list = ", ".join([t.get("title", "ללא כותרת") for t in request.tasks[:5]])
-                    replies = [
-                        f"אני מבין שאתה רוצה לעדכן משימה. איזו משימה? יש לך {len(request.tasks)} משימות: {task_list}",
-                        f"בוא נעדכן משימה! איזו מהמשימות שלך? ({task_list})",
-                        f"אני יכול לעזור לך לעדכן. איזו משימה? הנה המשימות שלך: {task_list}"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                    reply = f"Which task would you like to update? You have {len(request.tasks)} tasks. Please specify the task name."
+                # No state marker for initial clarify
+                reply += "\n[[STATE:UPDATE:IDENTIFY_TASK]]"
+                command_intent = "clarify"
+                missing_fields = ["task_selection"]
+            
+            elif len(matches) == 1:
+                # Unique match - transition to ASK_FIELD
+                task = matches[0]
+                task_title = task.get("title", "Untitled")
+                task_id = task.get("id")
+                
+                # Populate ref
+                if task_id:
+                    ref = {"task_id": str(task_id)}
+                else:
+                    ref = {"title": task_title}
+                
+                # Ask what field to update
+                if is_hebrew:
+                    reply = f"מה תרצה לשנות במשימה '{task_title}'? (כותרת/עדיפות/תאריך יעד/סטטוס)"
+                else:
+                    reply = f"What would you like to change in task '{task_title}'? (title/priority/deadline/status)"
+                reply += "\n[[STATE:UPDATE:ASK_FIELD]]"
+                missing_fields = ["field_selection"]
+            
             else:
-                # Task identified
-                # Rule 8: Check for confirmation
-                has_confirmation = False
-                if request.conversation_history:
-                    for msg in request.conversation_history[-3:]:
-                        content_lower = msg.get("content", "").lower()
-                        role = msg.get("role", "")
-                        if role == "assistant":
-                            # Check if confirmation was requested
-                            if "אישור" in content_lower or "confirm" in content_lower or "מוכן" in content_lower or "ready" in content_lower:
-                                # Next user message should be confirmation
-                                pass
-                        elif role == "user":
-                            # Check if user confirmed
-                            confirm_keywords = ["כן", "yes", "אשר", "confirm", "מוכן", "ok", "אוקיי", "ready"]
-                            if any(keyword in content_lower for keyword in confirm_keywords):
-                                has_confirmation = True
-                
-                # Check conversation history for collected fields
-                has_title = False
-                has_priority = False
-                has_deadline_asked = False
-                
-                if request.conversation_history:
-                    for msg in request.conversation_history[-5:]:
-                        content_lower = msg.get("content", "").lower()
-                        role = msg.get("role", "")
-                        if role == "user":
-                            if any(len(word) > 3 for word in content_lower.split()):
-                                has_title = True
-                            if any(priority_word in content_lower for priority_word in ["low", "medium", "high", "urgent", "נמוכה", "בינונית", "גבוהה", "דחופה"]):
-                                has_priority = True
-                        elif role == "assistant":
-                            if "תאריך" in content_lower or "יעד" in content_lower:
-                                has_deadline_asked = True
-                
-                if not has_title:
-                    replies = [
-                        "מעולה! מה הכותרת החדשה של המשימה? (או תגיד 'להשאיר' אם לא רוצה לשנות)",
-                        "בוא נעדכן! מה הכותרת? (או 'להשאיר' אם לא רוצה לשנות)",
-                        "אני יכול לעזור לך לעדכן. מה הכותרת החדשה? (או 'להשאיר' אם לא רוצה לשנות)"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
-                elif not has_priority:
-                    replies = [
-                        "טוב! מה העדיפות החדשה? (נמוכה/בינונית/גבוהה/דחופה)",
-                        "מעולה! מה העדיפות? (נמוכה/בינונית/גבוהה/דחופה)",
-                        "נהדר! מה העדיפות החדשה? (נמוכה/בינונית/גבוהה/דחופה)"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
-                elif not has_deadline_asked:
-                    replies = [
-                        "מצוין! האם יש תאריך יעד חדש? (אם לא, פשוט תגיד 'לא' או 'אין')",
-                        "טוב! האם יש תאריך יעד? (אם לא, תגיד 'לא')",
-                        "נהדר! האם יש תאריך יעד חדש? (אם לא, תגיד 'אין')"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
-                elif not has_confirmation:
-                    # Rule 8: Final step - ask for confirmation
-                    replies = [
-                        "מעולה! אני מוכן לעדכן את המשימה. האם אתה מוכן? (כן/לא)",
-                        "טוב! אני מוכן לעדכן. האם אתה מוכן? (כן/לא)",
-                        "נהדר! אני מוכן לעדכן את המשימה. האם אתה מוכן? (כן/לא)"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                # Multiple matches - transition to SELECT_TASK
+                if is_hebrew:
+                    reply = f"נמצאו {len(matches)} משימות תואמות. איזו משימה תרצה לעדכן?\n"
                 else:
-                    # Confirmation received - this should trigger LLM to set ready=true
-                    reply = "מעולה! אני מעדכן את המשימה עכשיו..."
-            suggestions = ["שנה עדיפות", "שנה תאריך יעד", "שנה סטטוס"] if not has_confirmation else []
+                    reply = f"Found {len(matches)} matching tasks. Which task would you like to update?\n"
+                
+                # List up to 5 matching tasks
+                options_list = []
+                for i, task in enumerate(matches[:5], 1):
+                    task_title = task.get("title", "Untitled")
+                    task_id = task.get("id", "")
+                    if is_hebrew:
+                        options_list.append(f"{i}. {task_title} (ID: {task_id})")
+                    else:
+                        options_list.append(f"{i}. {task_title} (ID: {task_id})")
+                
+                reply += "\n".join(options_list)
+                reply += "\n[[STATE:UPDATE:SELECT_TASK]]"
+                command_intent = "clarify"
+                missing_fields = ["task_selection"]
+        
+        elif current_state == "SELECT_TASK":
+            # SELECT_TASK state: Interpret user input as task selection (same logic as DELETE)
+            user_input = request.message.strip()
+            user_input_lower = user_input.lower()
+            
+            # Get matching tasks from history
+            matching_tasks = []
+            if request.conversation_history:
+                select_task_msg_idx = None
+                # Use the LAST SELECT_TASK marker to avoid stale selections in long conversations
+                for i in range(len(request.conversation_history) - 1, -1, -1):
+                    msg = request.conversation_history[i]
+                    if msg.get("role") == "assistant" and "[[STATE:UPDATE:SELECT_TASK]]" in msg.get("content", ""):
+                        select_task_msg_idx = i
+                        break
+                    elif msg.get("role") == "assistant" and "[[STATE:UPDATE:IDENTIFY_TASK]]" in msg.get("content", ""):
+                        select_task_msg_idx = i
+                        break
+                
+                if select_task_msg_idx is not None and select_task_msg_idx > 0:
+                    for i in range(select_task_msg_idx - 1, -1, -1):
+                        if request.conversation_history[i].get("role") == "user":
+                            original_message = request.conversation_history[i].get("content", "")
+                            matching_tasks = self._find_tasks_by_id_or_title(request.tasks, original_message)
+                            break
+            
+            if not matching_tasks:
+                matching_tasks = self._find_tasks_by_id_or_title(request.tasks, request.message)
+            
+            selected_task = None
+            
+            # Selection interpretation (same as DELETE)
+            if user_input.isdigit():
+                option_num = int(user_input)
+                if 1 <= option_num <= min(len(matching_tasks), 5):
+                    selected_task = matching_tasks[option_num - 1]
+            
+            if not selected_task:
+                for task in matching_tasks[:5]:
+                    task_id = str(task.get("id", ""))
+                    if task_id == user_input or task_id == user_input_lower:
+                        selected_task = task
+                        break
+            
+            if not selected_task:
+                normalized_input = self._normalize_title(user_input)
+                for task in matching_tasks[:5]:
+                    normalized_task_title = self._normalize_title(task.get("title", ""))
+                    if normalized_input and normalized_task_title == normalized_input:
+                        selected_task = task
+                        break
+            
+            if selected_task:
+                # Valid selection - transition to ASK_FIELD
+                task_title = selected_task.get("title", "Untitled")
+                task_id = selected_task.get("id")
+                
+                if task_id:
+                    ref = {"task_id": str(task_id)}
+                else:
+                    ref = {"title": task_title}
+                
+                # Ask what field to update
+                if is_hebrew:
+                    reply = f"מה תרצה לשנות במשימה '{task_title}'? (כותרת/עדיפות/תאריך יעד/סטטוס)"
+                else:
+                    reply = f"What would you like to change in task '{task_title}'? (title/priority/deadline/status)"
+                reply += "\n[[STATE:UPDATE:ASK_FIELD]]"
+                command_intent = "update_task"
+                missing_fields = ["field_selection"]
+            else:
+                # Invalid selection - re-ask
+                if is_hebrew:
+                    reply = f"אני לא זיהיתי את הבחירה. אנא בחר מספר (1-{min(len(matching_tasks), 5)}), ID משימה, או שם משימה מדויק."
+                else:
+                    reply = f"I didn't recognize the selection. Please choose a number (1-{min(len(matching_tasks), 5)}), task ID, or exact task name."
+                reply += "\n[[STATE:UPDATE:SELECT_TASK]]"
+                command_intent = "clarify"
+                missing_fields = ["task_selection"]
+        
+        elif current_state == "ASK_FIELD":
+            # ASK_FIELD state: Extract field name from user message
+            user_input = request.message.strip().lower()
+            
+            # Recover ref from history if not set
+            if not ref and request.conversation_history:
+                for msg in reversed(request.conversation_history):
+                    if msg.get("role") == "assistant" and "[[STATE:UPDATE:ASK_FIELD]]" in msg.get("content", ""):
+                        content = msg.get("content", "")
+                        for task in request.tasks:
+                            task_title = task.get("title", "")
+                            if task_title in content:
+                                task_id = task.get("id")
+                                if task_id:
+                                    ref = {"task_id": str(task_id)}
+                                else:
+                                    ref = {"title": task_title}
+                                break
+                        if ref:
+                            break
+            
+            # Field mapping (normalized)
+            field_map_en = {"title": "title", "priority": "priority", "deadline": "deadline", "status": "status"}
+            field_map_he = {"כותרת": "title", "עדיפות": "priority", "תאריך יעד": "deadline", "תאריך": "deadline", "סטטוס": "status"}
+            
+            selected_field = None
+            for key, value in field_map_en.items():
+                if key in user_input:
+                    selected_field = value
+                    break
+            if not selected_field:
+                for key, value in field_map_he.items():
+                    if key in user_input:
+                        selected_field = value
+                        break
+            
+            if selected_field:
+                # Valid field - transition to ASK_VALUE
+                if selected_field == "priority":
+                    if is_hebrew:
+                        reply = "מה העדיפות החדשה? (נמוכה/בינונית/גבוהה/דחופה)"
+                    else:
+                        reply = "What's the new priority? (low/medium/high/urgent)"
+                elif selected_field == "deadline":
+                    if is_hebrew:
+                        reply = "מה תאריך היעד החדש? (תאריך בפורמט מספרי או 'אין')"
+                    else:
+                        reply = "What's the new deadline? (numeric date or 'none')"
+                elif selected_field == "title":
+                    if is_hebrew:
+                        reply = "מה הכותרת החדשה?"
+                    else:
+                        reply = "What's the new title?"
+                elif selected_field == "status":
+                    if is_hebrew:
+                        reply = "מה הסטטוס החדש? (פתוח/בביצוע/בוצע)"
+                    else:
+                        reply = "What's the new status? (open/in_progress/done)"
+                
+                reply += f"\n[[STATE:UPDATE:ASK_VALUE:{selected_field}]]"
+                missing_fields = [f"{selected_field}_value"]
+            else:
+                # Invalid field - re-ask
+                if is_hebrew:
+                    reply = "אני לא זיהיתי את השדה. אנא בחר: כותרת, עדיפות, תאריך יעד, או סטטוס."
+                else:
+                    reply = "I didn't recognize the field. Please choose: title, priority, deadline, or status."
+                reply += "\n[[STATE:UPDATE:ASK_FIELD]]"
+                missing_fields = ["field_selection"]
+        
+        elif current_state == "ASK_VALUE":
+            # ASK_VALUE state: Extract value for the field
+            user_input = request.message.strip()
+            
+            # Recover ref and field from history if not set
+            if not ref and request.conversation_history:
+                for msg in reversed(request.conversation_history):
+                    if msg.get("role") == "assistant" and "[[STATE:UPDATE:ASK_VALUE:" in msg.get("content", ""):
+                        content = msg.get("content", "")
+                        # Extract field from marker
+                        match = re.search(r'\[\[STATE:UPDATE:ASK_VALUE:(\w+)\]\]', content)
+                        if match:
+                            current_field = match.group(1)
+                        # Find task from content
+                        for task in request.tasks:
+                            task_title = task.get("title", "")
+                            if task_title in content or len(request.tasks) == 1:
+                                task_id = task.get("id")
+                                if task_id:
+                                    ref = {"task_id": str(task_id)}
+                                else:
+                                    ref = {"title": task_title}
+                                break
+                        if ref:
+                            break
+            
+            # Validate and extract value based on field type
+            value_extracted = None
+            
+            if current_field == "priority":
+                priority_map = {
+                    "low": "low", "medium": "medium", "high": "high", "urgent": "urgent",
+                    "נמוכה": "low", "בינונית": "medium", "גבוהה": "high", "דחופה": "urgent"
+                }
+                user_input_lower = user_input.lower()
+                value_extracted = priority_map.get(user_input_lower)
+            
+            elif current_field == "deadline":
+                is_valid, normalized_deadline = self._validate_deadline_format(user_input)
+                none_keywords = ["no", "none", "skip", "לא", "אין", "בלי", "דלג"]
+                if user_input.lower().strip() in [kw.lower() for kw in none_keywords]:
+                    value_extracted = None
+                elif is_valid:
+                    value_extracted = normalized_deadline
+            
+            elif current_field == "title":
+                if user_input.strip():
+                    value_extracted = user_input.strip()
+            
+            elif current_field == "status":
+                # Status alias mapping (must match existing TaskStatus enum)
+                status_map_en = {"open": "open", "in_progress": "in_progress", "done": "done", "completed": "done"}
+                status_map_he = {"פתוח": "open", "בביצוע": "in_progress", "בוצע": "done", "סיימתי": "done"}
+                user_input_lower = user_input.lower()
+                value_extracted = status_map_en.get(user_input_lower) or status_map_he.get(user_input)
+            
+            if value_extracted is not None or (current_field == "deadline" and user_input.lower().strip() in ["no", "none", "skip", "לא", "אין"]):
+                # Valid value - store in fields and transition to ASK_CONFIRMATION
+                fields[current_field] = value_extracted
+                
+                # Build confirmation message
+                field_display = {"title": "כותרת" if is_hebrew else "title",
+                                "priority": "עדיפות" if is_hebrew else "priority",
+                                "deadline": "תאריך יעד" if is_hebrew else "deadline",
+                                "status": "סטטוס" if is_hebrew else "status"}.get(current_field, current_field)
+                
+                value_display = "אין" if value_extracted is None else str(value_extracted)
+                
+                if is_hebrew:
+                    reply = f"עדכון: {field_display} -> {value_display}. האם אתה בטוח שברצונך לעדכן?"
+                else:
+                    reply = f"Update: {field_display} -> {value_display}. Are you sure you want to update?"
+                reply += "\n[[STATE:UPDATE:ASK_CONFIRMATION]]"
+                missing_fields = ["confirmation"]
+            else:
+                # Invalid value - re-ask
+                if current_field == "priority":
+                    if is_hebrew:
+                        reply = "אני לא זיהיתי את העדיפות. אנא בחר: נמוכה, בינונית, גבוהה, או דחופה."
+                    else:
+                        reply = "I didn't recognize the priority. Please choose: low, medium, high, or urgent."
+                elif current_field == "deadline":
+                    if is_hebrew:
+                        reply = "אני צריך תאריך בפורמט מספרי (YYYY-MM-DD) או 'אין'."
+                    else:
+                        reply = "I need a date in numeric format (YYYY-MM-DD) or 'none'."
+                elif current_field == "status":
+                    if is_hebrew:
+                        reply = "אני לא זיהיתי את הסטטוס. אנא בחר: פתוח, בביצוע, או בוצע."
+                    else:
+                        reply = "I didn't recognize the status. Please choose: open, in_progress, or done."
+                else:
+                    if is_hebrew:
+                        reply = "אני לא זיהיתי את הערך. אנא נסה שוב."
+                    else:
+                        reply = "I didn't recognize the value. Please try again."
+                
+                reply += f"\n[[STATE:UPDATE:ASK_VALUE:{current_field}]]"
+                missing_fields = [f"{current_field}_value"]
+        
+        elif current_state == "ASK_CONFIRMATION":
+            # ASK_CONFIRMATION state: Detect confirmation tokens (same logic as DELETE)
+            user_input = request.message.strip().lower()
+            
+            # Recover ref and fields from history if not set
+            if not ref and request.conversation_history:
+                for msg in reversed(request.conversation_history):
+                    if msg.get("role") == "assistant" and ("[[STATE:UPDATE:ASK_CONFIRMATION]]" in msg.get("content", "") or "[[STATE:UPDATE:ASK_VALUE:" in msg.get("content", "")):
+                        content = msg.get("content", "")
+                        # Extract field and value from content
+                        for task in request.tasks:
+                            task_title = task.get("title", "")
+                            if task_title in content or len(request.tasks) == 1:
+                                task_id = task.get("id")
+                                if task_id:
+                                    ref = {"task_id": str(task_id)}
+                                else:
+                                    ref = {"title": task_title}
+                                break
+                        if ref:
+                            break
+            
+            if not fields and request.conversation_history:
+                # Recover fields from ASK_VALUE message
+                for msg in reversed(request.conversation_history):
+                    if msg.get("role") == "assistant" and "[[STATE:UPDATE:ASK_VALUE:" in msg.get("content", ""):
+                        match = re.search(r'\[\[STATE:UPDATE:ASK_VALUE:(\w+)\]\]', msg.get("content", ""))
+                        if match:
+                            field = match.group(1)
+                            # Try to extract value from next user message
+                            msg_idx = None
+                            for i, m in enumerate(request.conversation_history):
+                                if m == msg:
+                                    msg_idx = i
+                                    break
+                            if msg_idx is not None and msg_idx + 1 < len(request.conversation_history):
+                                next_msg = request.conversation_history[msg_idx + 1]
+                                if next_msg.get("role") == "user":
+                                    value_input = next_msg.get("content", "").strip()
+                                    # Extract value (simplified - use same validation logic)
+                                    if field == "priority":
+                                        priority_map = {"low": "low", "medium": "medium", "high": "high", "urgent": "urgent",
+                                                       "נמוכה": "low", "בינונית": "medium", "גבוהה": "high", "דחופה": "urgent"}
+                                        value = priority_map.get(value_input.lower())
+                                        if value:
+                                            fields[field] = value
+                                            break
+                                    elif field == "deadline":
+                                        is_valid, normalized = self._validate_deadline_format(value_input)
+                                        none_keywords = ["no", "none", "skip", "לא", "אין", "בלי", "דלג"]
+                                        if value_input.lower().strip() in [kw.lower() for kw in none_keywords]:
+                                            fields[field] = None
+                                            break
+                                        elif is_valid:
+                                            fields[field] = normalized
+                                            break
+                                    elif field == "title":
+                                        if value_input.strip():
+                                            fields[field] = value_input.strip()
+                                            break
+                                    elif field == "status":
+                                        status_map = {"open": "open", "in_progress": "in_progress", "done": "done", "completed": "done",
+                                                     "פתוח": "open", "בביצוע": "in_progress", "בוצע": "done", "סיימתי": "done"}
+                                        value = status_map.get(value_input.lower()) or status_map.get(value_input)
+                                        if value:
+                                            fields[field] = value
+                                            break
+            
+            # Confirmation token detection
+            tokens = self._normalize_confirmation_text(request.message)
+            confirm_tokens = {"כן", "אוקיי", "אישור", "yes", "ok", "okay", "confirm"}
+            cancel_tokens = {"לא", "no", "cancel", "canceled", "cancelled"}
+
+            has_confirm = any(t in confirm_tokens for t in tokens)
+            has_cancel = any(t in cancel_tokens for t in tokens)
+
+            # If user wrote both, prefer cancel (safer)
+            is_confirmed = has_confirm and not has_cancel
+            is_cancelled = has_cancel and not has_confirm
+
+            if is_confirmed and ref and fields:
+                ready = True
+                confidence = 1.0
+                missing_fields = []
+                command_intent = "update_task"
+                reply = "מאושר. העדכון יתבצע." if is_hebrew else "Confirmed. Update will proceed."
+
+            elif is_cancelled:
+                    ref = None
+                    fields = {}
+                    ready = False
+                    confidence = 1.0
+                    missing_fields = []
+                    command_intent = "update_task_cancelled"
+                    reply = "העדכון בוטל." if is_hebrew else "Update cancelled."
+            else:
+                ready = False
+                confidence = 0.7
+                missing_fields = ["confirmation"]
+                command_intent = "clarify"
+                reply = "אני צריך אישור מפורש. האם אתה בטוח שברצונך לעדכן? (כן/לא)" if is_hebrew else \
+                        "I need explicit confirmation. Are you sure you want to update? (yes/no)"
         else:
-            if not task_mentioned:
-                if len(request.tasks) == 1:
-                    replies = [
-                        f"I understand you want to update a task. Do you mean '{request.tasks[0].get('title', 'the task')}'?",
-                        f"Let's update a task! Is '{request.tasks[0].get('title', 'the task')}' the one you want to change?",
-                        f"I can help you update. Is '{request.tasks[0].get('title', 'the task')}' the task?"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+            # Fallback
+            logger.warning(f"Unknown state in _handle_update_task: {current_state}")
+            current_state = "IDENTIFY_TASK"
+            matches = self._find_tasks_by_id_or_title(request.tasks, request.message)
+            if len(matches) == 1:
+                task = matches[0]
+                task_title = task.get("title", "Untitled")
+                task_id = task.get("id")
+                if task_id:
+                    ref = {"task_id": str(task_id)}
                 else:
-                    task_list = ", ".join([t.get("title", "Untitled") for t in request.tasks[:5]])
-                    replies = [
-                        f"I understand you want to update a task. Which task? You have {len(request.tasks)} tasks: {task_list}",
-                        f"Let's update a task! Which one? ({task_list})",
-                        f"I can help you update. Which task? Here are your tasks: {task_list}"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                    ref = {"title": task_title}
+                if is_hebrew:
+                    reply = f"מה תרצה לשנות במשימה '{task_title}'? (כותרת/עדיפות/תאריך יעד/סטטוס)"
+                else:
+                    reply = f"What would you like to change in task '{task_title}'? (title/priority/deadline/status)"
+                reply += "\n[[STATE:UPDATE:ASK_FIELD]]"
+                missing_fields = ["field_selection"]
             else:
-                # Task identified
-                # Rule 8: Check for confirmation
-                has_confirmation = False
-                if request.conversation_history:
-                    for msg in request.conversation_history[-3:]:
-                        content_lower = msg.get("content", "").lower()
-                        role = msg.get("role", "")
-                        if role == "assistant":
-                            # Check if confirmation was requested
-                            if "confirm" in content_lower or "ready" in content_lower:
-                                # Next user message should be confirmation
-                                pass
-                        elif role == "user":
-                            # Check if user confirmed
-                            confirm_keywords = ["yes", "confirm", "ok", "okay", "ready"]
-                            if any(keyword in content_lower for keyword in confirm_keywords):
-                                has_confirmation = True
-                
-                # Check conversation history for collected fields
-                has_title = False
-                has_priority = False
-                has_deadline_asked = False
-                
-                if request.conversation_history:
-                    for msg in request.conversation_history[-5:]:
-                        content_lower = msg.get("content", "").lower()
-                        role = msg.get("role", "")
-                        if role == "user":
-                            if any(len(word) > 3 for word in content_lower.split()):
-                                has_title = True
-                            if any(priority_word in content_lower for priority_word in ["low", "medium", "high", "urgent"]):
-                                has_priority = True
-                        elif role == "assistant":
-                            if "deadline" in content_lower:
-                                has_deadline_asked = True
-                
-                if not has_title:
-                    replies = [
-                        "Great! What's the new title for the task? (or say 'keep' if you don't want to change it)",
-                        "Let's update! What's the title? (or 'keep' if you don't want to change)",
-                        "I can help you update. What's the new title? (or 'keep' if you don't want to change)"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
-                elif not has_priority:
-                    replies = [
-                        "Good! What's the new priority? (low/medium/high/urgent)",
-                        "Perfect! What's the priority? (low/medium/high/urgent)",
-                        "Great! What's the new priority? (low/medium/high/urgent)"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
-                elif not has_deadline_asked:
-                    replies = [
-                        "Excellent! Is there a new deadline? (If not, just say 'no' or 'none')",
-                        "Good! Is there a deadline? (If not, say 'no')",
-                        "Perfect! Is there a new deadline? (If not, say 'none')"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
-                elif not has_confirmation:
-                    # Rule 8: Final step - ask for confirmation
-                    replies = [
-                        "Great! I'm ready to update the task. Are you ready? (yes/no)",
-                        "Perfect! I'm ready to update. Are you ready? (yes/no)",
-                        "Excellent! I'm ready to update the task. Are you ready? (yes/no)"
-                    ]
-                    reply = replies[hash(request.user_id + request.message) % len(replies)]
+                if is_hebrew:
+                    reply = f"איזו משימה תרצה לעדכן? יש לך {len(request.tasks)} משימות."
                 else:
-                    # Confirmation received - this should trigger LLM to set ready=true
-                    reply = "Great! I'm updating the task now..."
-            suggestions = ["Change priority", "Change deadline", "Change status"] if not has_confirmation else []
+                    reply = f"Which task would you like to update? You have {len(request.tasks)} tasks."
+
+                reply += "\n[[STATE:UPDATE:IDENTIFY_TASK]]"
+                command_intent = "clarify"
+                missing_fields = ["task_selection"]
+        
+        # Create command object
+        command = Command(
+            intent=command_intent,
+            confidence=confidence,
+            fields=fields if fields else None,
+            ref=ref,
+            filter=None,
+            ready=ready,
+            missing_fields=missing_fields if missing_fields else None
+        )
         
         return ChatResponse(
             reply=reply,
-            intent="potential_update",
-            suggestions=suggestions
+            intent=command_intent,
+            suggestions=[],
+            command=command
         )
 
+    def _normalize_title(self, title: str) -> str:
+        """
+        Normalize task title for matching: lowercase, trim, collapse whitespace.
+        Used for exact match requirement.
+        """
+        if not title:
+            return ""
+        # Lowercase, trim, collapse multiple spaces to single space
+        normalized = " ".join(title.lower().strip().split())
+        return normalized
+    
+    def _find_tasks_by_id_or_title(self, tasks: List[Dict[str, Any]], message: str) -> List[Dict[str, Any]]:
+        """
+        Find tasks by task_id or normalized title match.
+        
+        Returns list of matching tasks (can be 0, 1, or multiple).
+        Priority: task_id match > normalized title match.
+        """
+        if not tasks:
+            return []
+        
+        matches = []
+        message_lower = message.lower()
+        
+        # First, try to find by explicit task_id
+        for task in tasks:
+            task_id = task.get("id")
+            if task_id:
+                # Check if message contains the task_id as a string
+                if str(task_id) in message_lower or f"task {task_id}" in message_lower or f"משימה {task_id}" in message_lower:
+                    matches.append(task)
+                    continue
+        
+        # If no task_id matches found, try normalized title match
+        if not matches:
+            normalized_message_title = self._normalize_title(message)
+            for task in tasks:
+                task_title = task.get("title", "")
+                normalized_task_title = self._normalize_title(task_title)
+                
+                # Exact normalized match required
+                if normalized_message_title and normalized_task_title == normalized_message_title:
+                    matches.append(task)
+        
+        return matches
+
     def _handle_potential_delete(self, request: ChatRequest, is_hebrew: bool = False) -> ChatResponse:
-        """Handle potential delete task intent - asks for clarification."""
-        if not request.tasks:
+        """
+        Phase 2: Handle delete_task FSM with deterministic state markers.
+        
+        FSM Flow: INITIAL → IDENTIFY_TASK → [SELECT_TASK] → ASK_CONFIRMATION → READY
+        State inference from conversation_history (last marker wins).
+        """
+        if not request.tasks or len(request.tasks) == 0:
             if is_hebrew:
                 reply = "אין לך משימות למחוק."
-                suggestions = ["צור משימה", "ראה את כל המשימות"]
             else:
                 reply = "You don't have any tasks to delete."
-                suggestions = ["Create a task", "View all tasks"]
             return ChatResponse(
                 reply=reply,
-                intent="potential_delete",
-                suggestions=suggestions
+                intent="clarify",
+                suggestions=[],
+                command=Command(
+                    intent="clarify",
+                    confidence=0.7,
+                    ready=False,
+                    missing_fields=["task_selection"]
+                )
             )
         
-        # Check if task is specified
-        message_lower = request.message.lower()
-        task_titles = [t.get("title", "").lower() for t in request.tasks]
-        task_mentioned = any(title in message_lower for title in task_titles if title)
-        
-        # Rule 9: Check for confirmation
-        has_confirmation = False
+        # PHASE 2: State inference from conversation_history (deterministic)
+        # Get last active state marker (if any) by scanning from newest to oldest
+        current_state = None
         if request.conversation_history:
-            for msg in request.conversation_history[-3:]:
-                content_lower = msg.get("content", "").lower()
-                role = msg.get("role", "")
-                if role == "assistant":
-                    # Check if confirmation was requested
-                    if "אישור" in content_lower or "confirm" in content_lower or "בטוח" in content_lower:
-                        # Next user message should be confirmation
-                        pass
-                elif role == "user":
-                    # Check if user confirmed
-                    confirm_keywords = ["כן", "yes", "אשר", "confirm", "בטוח", "ok", "אוקיי"]
-                    if any(keyword in content_lower for keyword in confirm_keywords):
-                        has_confirmation = True
+            # Scan from newest to oldest
+            for msg in reversed(request.conversation_history):
+                if msg.get("role") == "assistant":
+                    content = msg.get("content", "")
+                    if "[[STATE:DELETE:ASK_CONFIRMATION]]" in content:
+                        current_state = "ASK_CONFIRMATION"
+                        break
+                    elif "[[STATE:DELETE:SELECT_TASK]]" in content:
+                        current_state = "SELECT_TASK"
+                        break
         
-        if is_hebrew:
-            if not task_mentioned:
-                if len(request.tasks) == 1:
-                    task = request.tasks[0]
-                    task_desc = f"משימה: '{task.get('title', 'ללא כותרת')}', עדיפות: {task.get('priority', 'לא צוין')}, תאריך יעד: {task.get('deadline', 'אין')}"
-                    reply = f"אני מבין שאתה רוצה למחוק משימה. האם אתה מתכוון ל'{task.get('title', 'המשימה')}'?\n{task_desc}\nזה ימחק את המשימה לצמיתות."
+        # If no state marker found, start at IDENTIFY_TASK (not INITIAL - we're past keyword detection)
+        if current_state is None:
+            current_state = "IDENTIFY_TASK"
+        
+        # Initialize command fields
+        ref = None
+        missing_fields = []
+        ready = False
+        confidence = 0.7
+        command_intent = "delete_task"
+        
+        # PHASE 2: State machine logic (deterministic)
+        if current_state == "IDENTIFY_TASK":
+            # IDENTIFY_TASK state: Match by task_id or normalized title
+            matches = self._find_tasks_by_id_or_title(request.tasks, request.message)
+            
+            if len(matches) == 0:
+                # No match - ask user to specify which task
+                if is_hebrew:
+                    reply = f"איזו משימה תרצה למחוק? יש לך {len(request.tasks)} משימות. אנא ציין את שם המשימה."
                 else:
-                    reply = f"אני מבין שאתה רוצה למחוק משימה. איזו משימה? יש לך {len(request.tasks)} משימות. אנא ציין את שם המשימה."
-                    task_list = ", ".join([t.get("title", "ללא כותרת") for t in request.tasks[:5]])
-                    reply += f" המשימות שלך: {task_list}"
-            elif not has_confirmation:
-                # Task identified, present description and ask for confirmation (Rule 9)
-                task = None
-                for t in request.tasks:
-                    if t.get("title", "").lower() in message_lower:
-                        task = t
-                        break
-                if task:
-                    task_desc = f"משימה: '{task.get('title', 'ללא כותרת')}', עדיפות: {task.get('priority', 'לא צוין')}, תאריך יעד: {task.get('deadline', 'אין')}"
-                    reply = f"אני מבין שאתה רוצה למחוק משימה.\n{task_desc}\nזה ימחק את המשימה לצמיתות. האם אתה בטוח? (כן/לא)"
+                    reply = f"Which task would you like to delete? You have {len(request.tasks)} tasks. Please specify the task name."
+                # No state marker for initial clarify (does not advance flow)
+                reply += "\n[[STATE:DELETE:IDENTIFY_TASK]]"
+                command_intent = "clarify"
+                missing_fields = ["task_selection"]
+            
+            elif len(matches) == 1:
+                # Unique match - transition to ASK_CONFIRMATION
+                task = matches[0]
+                task_title = task.get("title", "Untitled")
+                task_id = task.get("id")
+                
+                # Populate ref
+                if task_id:
+                    ref = {"task_id": str(task_id)}
                 else:
-                    reply = "אני מבין שאתה רוצה למחוק משימה. זה ימחק את המשימה לצמיתות. האם אתה בטוח? (כן/לא)"
+                    ref = {"title": task_title}
+                
+                # Ask for confirmation
+                if is_hebrew:
+                    reply = f"האם אתה בטוח שברצונך למחוק את המשימה '{task_title}'?"
+                else:
+                    reply = f"Are you sure you want to delete the task '{task_title}'?"
+                reply += "\n[[STATE:DELETE:ASK_CONFIRMATION]]"
+                missing_fields = ["confirmation"]
+            
             else:
-                # Confirmation received, ready to delete
-                reply = "ממתין למחיקה..."
-            suggestions = ["אשר מחיקה", "בטל", "ראה את כל המשימות"] if not has_confirmation else []
+                # Multiple matches - transition to SELECT_TASK
+                if is_hebrew:
+                    reply = f"נמצאו {len(matches)} משימות תואמות. איזו משימה תרצה למחוק?\n"
+                else:
+                    reply = f"Found {len(matches)} matching tasks. Which task would you like to delete?\n"
+                
+                # List up to 5 matching tasks (title + id)
+                options_list = []
+                for i, task in enumerate(matches[:5], 1):
+                    task_title = task.get("title", "Untitled")
+                    task_id = task.get("id", "")
+                    if is_hebrew:
+                        options_list.append(f"{i}. {task_title} (ID: {task_id})")
+                    else:
+                        options_list.append(f"{i}. {task_title} (ID: {task_id})")
+                
+                reply += "\n".join(options_list)
+                reply += "\n[[STATE:DELETE:SELECT_TASK]]"
+                command_intent = "clarify"
+                missing_fields = ["task_selection"]
+        
+        elif current_state == "SELECT_TASK":
+            # SELECT_TASK state: Interpret user input as task selection
+            user_input = request.message.strip()
+            user_input_lower = user_input.lower()
+            
+            # Get the list of matching tasks from previous IDENTIFY_TASK response
+            # Find the user message that triggered IDENTIFY_TASK (the one before SELECT_TASK marker)
+            matching_tasks = []
+            if request.conversation_history:
+                # Find the SELECT_TASK assistant message index
+                select_task_msg_idx = None
+                for i, msg in enumerate(request.conversation_history):
+                    if msg.get("role") == "assistant" and "[[STATE:DELETE:SELECT_TASK]]" in msg.get("content", ""):
+                        select_task_msg_idx = i
+                        break
+                
+                # Find the user message before SELECT_TASK (that triggered IDENTIFY_TASK)
+                if select_task_msg_idx is not None and select_task_msg_idx > 0:
+                    for i in range(select_task_msg_idx - 1, -1, -1):
+                        if request.conversation_history[i].get("role") == "user":
+                            original_message = request.conversation_history[i].get("content", "")
+                            matching_tasks = self._find_tasks_by_id_or_title(request.tasks, original_message)
+                            break
+            
+            # Fallback: if we couldn't recover, try matching from current message
+            if not matching_tasks:
+                matching_tasks = self._find_tasks_by_id_or_title(request.tasks, request.message)
+            
+            selected_task = None
+            
+            # Selection input interpretation:
+            # 1. Number 1-5: maps to listed option by position
+            if user_input.isdigit():
+                option_num = int(user_input)
+                if 1 <= option_num <= min(len(matching_tasks), 5):
+                    selected_task = matching_tasks[option_num - 1]
+            
+            if not selected_task:
+                # 2. Exact task_id match: matches explicit task ID if it appears in displayed options
+                for task in matching_tasks[:5]:
+                    task_id = str(task.get("id", ""))
+                    if task_id == user_input or task_id == user_input_lower:
+                        selected_task = task
+                        break
+            
+            if not selected_task:
+                # 3. Exact normalized title match: matches normalized title if it appears in displayed options
+                normalized_input = self._normalize_title(user_input)
+                for task in matching_tasks[:5]:
+                    normalized_task_title = self._normalize_title(task.get("title", ""))
+                    if normalized_input and normalized_task_title == normalized_input:
+                        selected_task = task
+                        break
+            
+            if selected_task:
+                # Valid selection - transition to ASK_CONFIRMATION
+                task_title = selected_task.get("title", "Untitled")
+                task_id = selected_task.get("id")
+                
+                # Populate ref
+                if task_id:
+                    ref = {"task_id": str(task_id)}
+                else:
+                    ref = {"title": task_title}
+                
+                # Ask for confirmation
+                if is_hebrew:
+                    reply = f"האם אתה בטוח שברצונך למחוק את המשימה '{task_title}'?"
+                else:
+                    reply = f"Are you sure you want to delete the task '{task_title}'?"
+                reply += "\n[[STATE:DELETE:ASK_CONFIRMATION]]"
+                command_intent = "delete_task"
+                missing_fields = ["confirmation"]
+            else:
+                # Invalid selection - re-ask
+                if is_hebrew:
+                    reply = f"אני לא זיהיתי את הבחירה. אנא בחר מספר (1-{min(len(matching_tasks), 5)}), ID משימה, או שם משימה מדויק."
+                else:
+                    reply = f"I didn't recognize the selection. Please choose a number (1-{min(len(matching_tasks), 5)}), task ID, or exact task name."
+                reply += "\n[[STATE:DELETE:SELECT_TASK]]"
+                command_intent = "clarify"
+                missing_fields = ["task_selection"]
+        
+        elif current_state == "ASK_CONFIRMATION":
+            # ASK_CONFIRMATION state: Detect confirmation tokens
+            user_input = request.message.strip().lower()
+            
+            # Recover ref from conversation_history (from previous IDENTIFY_TASK or SELECT_TASK)
+            if not ref and request.conversation_history:
+                # Find the task that was identified before ASK_CONFIRMATION
+                for msg in reversed(request.conversation_history):
+                    if msg.get("role") == "assistant" and ("[[STATE:DELETE:ASK_CONFIRMATION]]" in msg.get("content", "") or "[[STATE:DELETE:SELECT_TASK]]" in msg.get("content", "")):
+                        # Extract task from the confirmation message
+                        # The confirmation message should contain the task title
+                        content = msg.get("content", "")
+                        # Try to find task from the message content
+                        for task in request.tasks:
+                            task_title = task.get("title", "")
+                            if task_title in content:
+                                task_id = task.get("id")
+                                if task_id:
+                                    ref = {"task_id": str(task_id)}
+                                else:
+                                    ref = {"title": task_title}
+                                break
+                        if ref:
+                            break
+            
+            # Confirmation token detection
+            tokens = self._normalize_confirmation_text(user_input)
+            confirm_tokens = {"כן", "אוקיי", "אישור", "yes", "ok", "okay", "confirm"}
+            cancel_tokens = {"לא", "no", "cancel", "canceled", "cancelled"}
+            has_confirm = any(t in confirm_tokens for t in tokens)
+            has_cancel = any(t in cancel_tokens for t in tokens)
+            is_confirmed = has_confirm and not has_cancel
+            is_cancelled = has_cancel and not has_confirm
+
+
+            if is_confirmed:
+                ready = True
+                confidence = 1.0
+                missing_fields = []
+                command_intent = "delete_task"
+                if is_hebrew:
+                    reply = "מאושר. המחיקה תתבצע."
+                else:
+                    reply = "Confirmed. Deletion will proceed."
+            elif is_cancelled:
+                ref = None
+                fields = {}
+                ready = False
+                confidence = 1.0
+                missing_fields = []
+                command_intent = "delete_task_cancelled"
+                reply = "המחיקה בוטלה." if is_hebrew else "Deletion cancelled."
+            else:
+                ready = False
+                confidence = 0.7
+                missing_fields = ["confirmation"]
+                command_intent = "clarify"
+                reply = "אני צריך אישור מפורש. האם אתה בטוח שברצונך למחוק? (כן/לא)" if is_hebrew else \
+                        "I need explicit confirmation. Are you sure you want to delete? (yes/no)"
         else:
-            if not task_mentioned:
-                if len(request.tasks) == 1:
-                    task = request.tasks[0]
-                    task_desc = f"Task: '{task.get('title', 'Untitled')}', Priority: {task.get('priority', 'Not specified')}, Deadline: {task.get('deadline', 'None')}"
-                    reply = f"I understand you want to delete a task. Do you mean '{task.get('title', 'the task')}'?\n{task_desc}\nThis will permanently delete the task."
+            # Fallback (should not happen)
+            logger.warning(f"Unknown state in _handle_potential_delete: {current_state}")
+            current_state = "IDENTIFY_TASK"
+            matches = self._find_tasks_by_id_or_title(request.tasks, request.message)
+            if len(matches) == 1:
+                task = matches[0]
+                task_title = task.get("title", "Untitled")
+                task_id = task.get("id")
+                if task_id:
+                    ref = {"task_id": str(task_id)}
                 else:
-                    reply = f"I understand you want to delete a task. Which task? You have {len(request.tasks)} tasks. Please specify the task name."
-                    task_list = ", ".join([t.get("title", "Untitled") for t in request.tasks[:5]])
-                    reply += f" Your tasks: {task_list}"
-            elif not has_confirmation:
-                # Task identified, present description and ask for confirmation (Rule 9)
-                task = None
-                for t in request.tasks:
-                    if t.get("title", "").lower() in message_lower:
-                        task = t
-                        break
-                if task:
-                    task_desc = f"Task: '{task.get('title', 'Untitled')}', Priority: {task.get('priority', 'Not specified')}, Deadline: {task.get('deadline', 'None')}"
-                    reply = f"I understand you want to delete a task.\n{task_desc}\nThis will permanently delete the task. Are you sure? (yes/no)"
+                    ref = {"title": task_title}
+                if is_hebrew:
+                    reply = f"האם אתה בטוח שברצונך למחוק את המשימה '{task_title}'?"
                 else:
-                    reply = "I understand you want to delete a task. This will permanently delete the task. Are you sure? (yes/no)"
+                    reply = f"Are you sure you want to delete the task '{task_title}'?"
+                reply += "\n[[STATE:DELETE:ASK_CONFIRMATION]]"
+                missing_fields = ["confirmation"]
             else:
-                # Confirmation received, ready to delete
-                reply = "Waiting for deletion..."
-            suggestions = ["Confirm deletion", "Cancel", "View all tasks"] if not has_confirmation else []
+                if is_hebrew:
+                    reply = f"איזו משימה תרצה למחוק? יש לך {len(request.tasks)} משימות."
+                else:
+                    reply = f"Which task would you like to delete? You have {len(request.tasks)} tasks."
+                command_intent = "clarify"
+                missing_fields = ["task_selection"]
+        
+        # Create command object
+        command = Command(
+            intent=command_intent,
+            confidence=confidence,
+            fields=None,
+            ref=ref,
+            filter=None,
+            ready=ready,
+            missing_fields=missing_fields if missing_fields else None
+        )
         
         return ChatResponse(
             reply=reply,
-            intent="potential_delete",
-            suggestions=suggestions
+            intent=command_intent,
+            suggestions=[],
+            command=command
         )
 
     def _handle_help(self, is_hebrew: bool = False) -> ChatResponse:
@@ -1024,7 +1601,6 @@ class ChatbotService:
         prompt_parts.append("- 'list_tasks' - user wants to see their tasks")
         prompt_parts.append("- 'task_insights' - user wants insights about tasks (deadlines, priorities, urgency)")
         prompt_parts.append("- 'potential_create' - user wants to create a task but information is incomplete")
-        prompt_parts.append("- 'potential_update' - user wants to update a task but target is unclear")
         prompt_parts.append("- 'potential_delete' - user wants to delete a task but target is unclear")
         prompt_parts.append("")
         prompt_parts.append("OUTPUT FORMAT (Phase 3 - Structured Output):")
@@ -1104,7 +1680,7 @@ class ChatbotService:
         prompt_parts.append("    6) FINAL: Execute ONLY after explicit confirmation")
         prompt_parts.append("  CRITICAL: DO NOT ask for multiple fields at once. Ask ONE field at a time, wait for user response, then ask the next field.")
         prompt_parts.append("  CRITICAL: If the assistant asked 'Are you ready?' or 'Confirm update?' and user replied 'yes'/'כן'/'confirm', then:")
-        prompt_parts.append("    - Set intent='update_task' (NOT 'potential_update')")
+        prompt_parts.append("    - Set intent='update_task'")
         prompt_parts.append("    - Set ready=true")
         prompt_parts.append("    - Set ref.task_id or ref.title to identify the task")
         prompt_parts.append("    - Set fields.title and fields.priority with the new values")
@@ -1180,7 +1756,7 @@ class ChatbotService:
         
         try:
             # Extract state markers from deterministic reply
-            state_marker_pattern = r'\[\[STATE:[^\]]+\]\]'
+            state_marker_pattern = r'\[\[STATE[^\]]+\]\]'
             state_markers = re.findall(state_marker_pattern, deterministic_reply)
             
             # Remove state markers temporarily for NLG (they will be re-inserted)
@@ -1631,9 +2207,7 @@ Just make the text more natural and conversational while keeping everything else
                                     # If title and priority are present, force ready=true
                                     if fields.get("title") and fields.get("priority"):
                                         ready = True
-                                        # Force intent to be update_task (not potential_update)
-                                        if intent == "potential_update":
-                                            intent = "update_task"
+                                        intent = "update_task"
                                         # Remove confirmation from missing_fields if it was there
                                         if "confirmation" in missing_fields:
                                             missing_fields.remove("confirmation")
@@ -1853,12 +2427,12 @@ Just make the text more natural and conversational while keeping everything else
         
         # UPDATE - check phrases first
         elif any(phrase in message_lower for phrase in update_phrases_hebrew):
-            return "potential_update"
+            return "update_task"
         # UPDATE - check single words
         elif any(word in message_lower for word in ["update", "change", "modify", "edit", "עדכן", "שנה", "ערוך"]):
-            return "potential_update"
+            return "update_task"
         elif any(word in message_lower for word in ["complete", "done", "finish", "בוצע", "סיים", "סיימתי"]):
-            return "potential_update"
+            return "update_task"
         
         # Check for list tasks (after action verbs)
         # Only match if it's clearly a list query, not an action
@@ -1886,7 +2460,7 @@ Just make the text more natural and conversational while keeping everything else
             return ["View detailed summary", "Filter by category", "View urgent tasks"]
         elif intent == "create_task" or intent == "potential_create":
             return ["Set deadline", "Add category", "Set priority"]
-        elif intent == "potential_update":
+        elif intent == "update_task":
             return ["Change priority", "Change deadline", "Change status"]
         elif intent == "potential_delete":
             return ["Confirm deletion", "Cancel", "View all tasks"]

@@ -20,6 +20,13 @@ from app.telegram import telegram_router
 from app.telegram.scheduler import WeeklySummaryScheduler
 from app.security import validate_security_config
 
+import logging
+
+logging.basicConfig(
+    level=getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
