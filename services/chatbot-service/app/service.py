@@ -990,15 +990,15 @@ class ChatbotService:
             # ASK_CONFIRMATION state: Detect confirmation tokens (same logic as DELETE)
             user_input = request.message.strip().lower()
             
-            # Recover ref and fields from history if not set
+            # Recover ref from history - look at ASK_FIELD message where task title is mentioned
             if not ref and request.conversation_history:
+                # First try: look at ASK_FIELD message (has task title)
                 for msg in reversed(request.conversation_history):
-                    if msg.get("role") == "assistant" and ("[[STATE:UPDATE:ASK_CONFIRMATION]]" in msg.get("content", "") or "[[STATE:UPDATE:ASK_VALUE:" in msg.get("content", "")):
+                    if msg.get("role") == "assistant" and "[[STATE:UPDATE:ASK_FIELD]]" in msg.get("content", ""):
                         content = msg.get("content", "")
-                        # Extract field and value from content
                         for task in request.tasks:
                             task_title = task.get("title", "")
-                            if task_title in content or len(request.tasks) == 1:
+                            if task_title and task_title in content:
                                 task_id = task.get("id")
                                 if task_id:
                                     ref = {"task_id": str(task_id)}
@@ -1007,6 +1007,15 @@ class ChatbotService:
                                 break
                         if ref:
                             break
+                
+                # Fallback: if only one task, use it directly
+                if not ref and request.tasks and len(request.tasks) == 1:
+                    task = request.tasks[0]
+                    task_id = task.get("id")
+                    if task_id:
+                        ref = {"task_id": str(task_id)}
+                    else:
+                        ref = {"title": task.get("title", "")}
             
             if not fields and request.conversation_history:
                 # Recover fields from ASK_VALUE message
@@ -1029,14 +1038,16 @@ class ChatbotService:
                                     if field == "priority":
                                         priority_map = {"low": "low", "medium": "medium", "high": "high", "urgent": "urgent",
                                                        "נמוכה": "low", "בינונית": "medium", "גבוהה": "high", "דחופה": "urgent"}
-                                        value = priority_map.get(value_input.lower())
+                                        # Try both lowercase and original for Hebrew support
+                                        value = priority_map.get(value_input.lower()) or priority_map.get(value_input)
                                         if value:
                                             fields[field] = value
                                             break
                                     elif field == "deadline":
                                         is_valid, normalized = self._validate_deadline_format(value_input)
                                         none_keywords = ["no", "none", "skip", "לא", "אין", "בלי", "דלג"]
-                                        if value_input.lower().strip() in [kw.lower() for kw in none_keywords]:
+                                        value_lower = value_input.lower().strip()
+                                        if value_lower in none_keywords or value_input.strip() in none_keywords:
                                             fields[field] = None
                                             break
                                         elif is_valid:
@@ -1072,15 +1083,19 @@ class ChatbotService:
                 missing_fields = []
                 command_intent = "update_task"
                 reply = "מאושר. העדכון יתבצע." if is_hebrew else "Confirmed. Update will proceed."
+                # Add DONE marker to exit UPDATE flow - prevents looping back to ASK_CONFIRMATION
+                reply += "\n[[STATE:DONE]]"
 
             elif is_cancelled:
-                    ref = None
-                    fields = {}
-                    ready = False
-                    confidence = 1.0
-                    missing_fields = []
-                    command_intent = "update_task_cancelled"
-                    reply = "העדכון בוטל." if is_hebrew else "Update cancelled."
+                ref = None
+                fields = {}
+                ready = False
+                confidence = 1.0
+                missing_fields = []
+                command_intent = "update_task_cancelled"
+                reply = "העדכון בוטל." if is_hebrew else "Update cancelled."
+                # Add DONE marker to exit UPDATE flow
+                reply += "\n[[STATE:DONE]]"
             else:
                 ready = False
                 confidence = 0.7
@@ -1088,6 +1103,8 @@ class ChatbotService:
                 command_intent = "clarify"
                 reply = "אני צריך אישור מפורש. האם אתה בטוח שברצונך לעדכן? (כן/לא)" if is_hebrew else \
                         "I need explicit confirmation. Are you sure you want to update? (yes/no)"
+                # Add ASK_CONFIRMATION marker so next response has current state
+                reply += "\n[[STATE:UPDATE:ASK_CONFIRMATION]]"
         else:
             # Fallback
             logger.warning(f"Unknown state in _handle_update_task: {current_state}")
@@ -1454,6 +1471,8 @@ class ChatbotService:
                     reply = "מאושר. המחיקה תתבצע."
                 else:
                     reply = "Confirmed. Deletion will proceed."
+                # Add DONE marker to exit DELETE flow - prevents looping back to ASK_CONFIRMATION
+                reply += "\n[[STATE:DONE]]"
             elif is_cancelled:
                 ref = None
                 fields = {}
@@ -1462,6 +1481,8 @@ class ChatbotService:
                 missing_fields = []
                 command_intent = "delete_task_cancelled"
                 reply = "המחיקה בוטלה." if is_hebrew else "Deletion cancelled."
+                # Add DONE marker to exit DELETE flow
+                reply += "\n[[STATE:DONE]]"
             else:
                 ready = False
                 confidence = 0.7
@@ -1469,6 +1490,8 @@ class ChatbotService:
                 command_intent = "clarify"
                 reply = "אני צריך אישור מפורש. האם אתה בטוח שברצונך למחוק? (כן/לא)" if is_hebrew else \
                         "I need explicit confirmation. Are you sure you want to delete? (yes/no)"
+                # Add ASK_CONFIRMATION marker so next response has current state
+                reply += "\n[[STATE:DELETE:ASK_CONFIRMATION]]"
         else:
             # Fallback (should not happen)
             logger.warning(f"Unknown state in _handle_potential_delete: {current_state}")

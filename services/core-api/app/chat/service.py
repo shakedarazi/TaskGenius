@@ -219,6 +219,10 @@ class ChatService:
                     
                     # Rule 8: Execute update_task if conditions are met
                     elif command.intent == "update_task" and command.confidence >= 0.8 and command.ready:
+                        from app.tasks.models import Task
+                        from app.tasks.enums import TaskStatus, TaskPriority
+                        from datetime import datetime
+                        
                         if not command.ref:
                             logger.warning("Update task command missing ref (task_id or title)")
                             is_hebrew = any('\u0590' <= char <= '\u05FF' for char in message)

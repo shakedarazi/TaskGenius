@@ -97,7 +97,7 @@ async def root() -> dict:
 # Phase 1: Authentication router
 app.include_router(auth_router)
 
-# Phase 2: Tasks routerdddddddddd
+# Phase 2: Tasks router
 app.include_router(tasks_router)
 
 # Phase 3: Insights router
