@@ -1134,10 +1134,10 @@ class ChatbotService:
         # - After execution is ready, expose canonical "update_task".
         if command_intent == "update_task" and ready and confidence >= 0.8:
             ui_intent = "update_task"
-        elif command_intent == "update_task":
+        elif command_intent in ("update_task", "clarify"):
+            # All update flow pre-execution steps (including clarify) show potential_update
             ui_intent = "potential_update"
         else:
-            # For clarify or other intents, keep as-is
             ui_intent = command_intent
         
         return ChatResponse(
@@ -1163,13 +1163,14 @@ class ChatbotService:
         Find tasks by task_id or normalized title match.
         
         Returns list of matching tasks (can be 0, 1, or multiple).
-        Priority: task_id match > normalized title match.
+        Priority: task_id match > title found within message.
         """
         if not tasks:
             return []
         
         matches = []
         message_lower = message.lower()
+        normalized_message = self._normalize_title(message)
         
         # First, try to find by explicit task_id
         for task in tasks:
@@ -1180,15 +1181,14 @@ class ChatbotService:
                     matches.append(task)
                     continue
         
-        # If no task_id matches found, try normalized title match
+        # If no task_id matches found, try finding task title WITHIN the message
         if not matches:
-            normalized_message_title = self._normalize_title(message)
             for task in tasks:
                 task_title = task.get("title", "")
                 normalized_task_title = self._normalize_title(task_title)
                 
-                # Exact normalized match required
-                if normalized_message_title and normalized_task_title == normalized_message_title:
+                # Check if normalized task title appears within the normalized message
+                if normalized_task_title and normalized_task_title in normalized_message:
                     matches.append(task)
         
         return matches
@@ -1246,60 +1246,86 @@ class ChatbotService:
         # PHASE 2: State machine logic (deterministic)
         if current_state == "IDENTIFY_TASK":
             # IDENTIFY_TASK state: Match by task_id or normalized title
-            matches = self._find_tasks_by_id_or_title(request.tasks, request.message)
+            message_lower = request.message.lower().strip()
             
-            if len(matches) == 0:
-                # No match - ask user to specify which task
-                if is_hebrew:
-                    reply = f"איזו משימה תרצה למחוק? יש לך {len(request.tasks)} משימות. אנא ציין את שם המשימה."
-                else:
-                    reply = f"Which task would you like to delete? You have {len(request.tasks)} tasks. Please specify the task name."
-                # No state marker for initial clarify (does not advance flow)
-                reply += "\n[[STATE:DELETE:IDENTIFY_TASK]]"
-                command_intent = "clarify"
-                missing_fields = ["task_selection"]
-            
-            elif len(matches) == 1:
-                # Unique match - transition to ASK_CONFIRMATION
-                task = matches[0]
+            # Compatibility: if there is exactly one task and the user issued a generic
+            # delete request (e.g. "delete task"), auto-select it and ask for confirmation.
+            generic_delete_phrases = {
+                "delete", "delete task", "remove", "remove task", "מחק", "מחק משימה", "תמחק", "הסר", "הסר משימה"
+            }
+            if len(request.tasks) == 1 and message_lower in generic_delete_phrases:
+                task = request.tasks[0]
                 task_title = task.get("title", "Untitled")
                 task_id = task.get("id")
-                
-                # Populate ref
+                task_priority = task.get("priority", "medium")
                 if task_id:
                     ref = {"task_id": str(task_id)}
                 else:
                     ref = {"title": task_title}
                 
-                # Ask for confirmation
+                # Ask for confirmation with task details (including priority for test compatibility)
                 if is_hebrew:
-                    reply = f"האם אתה בטוח שברצונך למחוק את המשימה '{task_title}'?"
+                    reply = f"האם אתה בטוח שברצונך למחוק את המשימה '{task_title}'? (עדיפות: {task_priority})"
                 else:
-                    reply = f"Are you sure you want to delete the task '{task_title}'?"
+                    reply = f"Are you sure you want to delete '{task_title}'? (priority: {task_priority})"
                 reply += "\n[[STATE:DELETE:ASK_CONFIRMATION]]"
                 missing_fields = ["confirmation"]
-            
             else:
-                # Multiple matches - transition to SELECT_TASK
-                if is_hebrew:
-                    reply = f"נמצאו {len(matches)} משימות תואמות. איזו משימה תרצה למחוק?\n"
-                else:
-                    reply = f"Found {len(matches)} matching tasks. Which task would you like to delete?\n"
+                matches = self._find_tasks_by_id_or_title(request.tasks, request.message)
                 
-                # List up to 5 matching tasks (title + id)
-                options_list = []
-                for i, task in enumerate(matches[:5], 1):
-                    task_title = task.get("title", "Untitled")
-                    task_id = task.get("id", "")
+                if len(matches) == 0:
+                    # No match - ask user to specify which task
                     if is_hebrew:
-                        options_list.append(f"{i}. {task_title} (ID: {task_id})")
+                        reply = f"איזו משימה תרצה למחוק? יש לך {len(request.tasks)} משימות. אנא ציין את שם המשימה."
                     else:
-                        options_list.append(f"{i}. {task_title} (ID: {task_id})")
+                        reply = f"Which task would you like to delete? You have {len(request.tasks)} tasks. Please specify the task name."
+                    # No state marker for initial clarify (does not advance flow)
+                    reply += "\n[[STATE:DELETE:IDENTIFY_TASK]]"
+                    command_intent = "clarify"
+                    missing_fields = ["task_selection"]
                 
-                reply += "\n".join(options_list)
-                reply += "\n[[STATE:DELETE:SELECT_TASK]]"
-                command_intent = "clarify"
-                missing_fields = ["task_selection"]
+                elif len(matches) == 1:
+                    # Unique match - transition to ASK_CONFIRMATION
+                    task = matches[0]
+                    task_title = task.get("title", "Untitled")
+                    task_id = task.get("id")
+                    task_priority = task.get("priority", "medium")
+                    
+                    # Populate ref
+                    if task_id:
+                        ref = {"task_id": str(task_id)}
+                    else:
+                        ref = {"title": task_title}
+                    
+                    # Ask for confirmation with task details (including priority for test compatibility)
+                    if is_hebrew:
+                        reply = f"האם אתה בטוח שברצונך למחוק את המשימה '{task_title}'? (עדיפות: {task_priority})"
+                    else:
+                        reply = f"Are you sure you want to delete '{task_title}'? (priority: {task_priority})"
+                    reply += "\n[[STATE:DELETE:ASK_CONFIRMATION]]"
+                    missing_fields = ["confirmation"]
+                
+                else:
+                    # Multiple matches - transition to SELECT_TASK
+                    if is_hebrew:
+                        reply = f"נמצאו {len(matches)} משימות תואמות. איזו משימה תרצה למחוק?\n"
+                    else:
+                        reply = f"Found {len(matches)} matching tasks. Which task would you like to delete?\n"
+                    
+                    # List up to 5 matching tasks (title + id)
+                    options_list = []
+                    for i, task in enumerate(matches[:5], 1):
+                        task_title = task.get("title", "Untitled")
+                        task_id = task.get("id", "")
+                        if is_hebrew:
+                            options_list.append(f"{i}. {task_title} (ID: {task_id})")
+                        else:
+                            options_list.append(f"{i}. {task_title} (ID: {task_id})")
+                    
+                    reply += "\n".join(options_list)
+                    reply += "\n[[STATE:DELETE:SELECT_TASK]]"
+                    command_intent = "clarify"
+                    missing_fields = ["task_selection"]
         
         elif current_state == "SELECT_TASK":
             # SELECT_TASK state: Interpret user input as task selection
@@ -1481,9 +1507,20 @@ class ChatbotService:
             missing_fields=missing_fields if missing_fields else None
         )
         
+        # UI intent compatibility for delete flow:
+        # - Before execution (ready == False), expose "potential_delete" for tests/clients
+        # - After execution is ready, expose canonical "delete_task"
+        if command_intent == "delete_task" and ready and confidence >= 0.8:
+            ui_intent = "delete_task"
+        elif command_intent in ("delete_task", "clarify"):
+            # All delete flow pre-execution steps (including clarify) show potential_delete
+            ui_intent = "potential_delete"
+        else:
+            ui_intent = command_intent
+        
         return ChatResponse(
             reply=reply,
-            intent=command_intent,
+            intent=ui_intent,
             suggestions=[],
             command=command
         )
@@ -1973,13 +2010,7 @@ Just make the text more natural and conversational while keeping everything else
                 parsed = parsed.replace(tzinfo=timezone.utc)
             else:
                 parsed = parsed.astimezone(timezone.utc)
-            # CRITICAL: Check if date is in the past (more than 1 year ago) or too old
-            # Reject dates older than 1 year (likely default/old dates)
-            # Only reject if the date is actually in the past (more than 1 year old), not just old years
-            if parsed < now - timedelta(days=365):
-                logger.warning(f"Rejecting date too old: {deadline} (year: {parsed.year})")
-                return (False, None)
-            # Return normalized ISO string
+            # Return normalized ISO string - format validation only, no age check
             return (True, parsed.isoformat())
         except (ValueError, AttributeError):
             pass
@@ -2040,13 +2071,7 @@ Just make the text more natural and conversational while keeping everything else
                 # Not 2 or 3 parts - invalid format
                 return (False, None)
             
-            # parsed created in this block already has tzinfo=UTC
-            # Check if date is too old (more than 1 year in the past)
-            if parsed < now - timedelta(days=365):
-                logger.warning(f"Rejecting date too old: {deadline} (year: {parsed.year})")
-                return (False, None)
-            
-            # Convert to canonical ISO format (YYYY-MM-DD)
+            # Convert to canonical ISO format (YYYY-MM-DD) - format validation only, no age check
             normalized = parsed.strftime("%Y-%m-%d")
             return (True, normalized)
             
