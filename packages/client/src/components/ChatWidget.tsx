@@ -3,7 +3,7 @@
  */
 
 import { useState, useRef, useEffect, type FormEvent } from 'react';
-import { chatApi } from '@/api';
+import { chatApi, tasksApi } from '@/api';
 import type { TaskSuggestion } from '@/types';
 
 interface Message {
@@ -107,22 +107,28 @@ export function ChatWidget() {
         }
     };
 
-    // Handle adding selected suggestions
+    // Handle adding selected suggestions - direct task creation in parallel
     const handleAddSelected = async () => {
         if (selected.size === 0 || loading) return;
         setLoading(true);
 
         const indices = Array.from(selected).sort((a, b) => a - b);
-        const added: string[] = [];
         
         try {
-            for (const index of indices) {
-                const deadline = deadlines[index] || undefined;
-                const response = await chatApi.selectSuggestion(index + 1, deadline);
-                if (response.added_task) {
-                    added.push(response.added_task.title);
-                }
-            }
+            // Build task payloads from selected suggestions
+            const createPromises = indices.map(index => {
+                const s = suggestions[index];
+                const deadline = deadlines[index];
+                return tasksApi.createTask({
+                    title: s.title,
+                    priority: s.priority as 'low' | 'medium' | 'high' | 'urgent',
+                    ...(deadline ? { deadline } : {}),
+                });
+            });
+
+            // Execute all in parallel
+            const results = await Promise.all(createPromises);
+            const added = results.map(t => t.title);
 
             // Clear suggestions after successful add
             setSuggestions([]);
@@ -130,17 +136,13 @@ export function ChatWidget() {
             const msg: Message = {
                 id: `a-${Date.now()}`,
                 role: 'assistant',
-                content: added.length > 0 
-                    ? `✅ Added ${added.length} task${added.length > 1 ? 's' : ''}: ${added.join(', ')}`
-                    : 'No tasks were added.',
+                content: `✅ Added ${added.length} task${added.length > 1 ? 's' : ''}: ${added.join(', ')}`,
                 timestamp: new Date(),
             };
             setMessages(prev => [...prev, msg]);
 
             // Notify app that tasks were created
-            if (added.length > 0) {
-                window.dispatchEvent(new CustomEvent('taskMutated', { detail: { intent: 'add_task' } }));
-            }
+            window.dispatchEvent(new CustomEvent('taskMutated', { detail: { intent: 'add_task' } }));
         } catch {
             setMessages(prev => [...prev, {
                 id: `e-${Date.now()}`,

@@ -31,23 +31,9 @@ def clear_cached_suggestions(user_id: str) -> None:
 
 
 def format_reply(summary: str, suggestions: List[Dict[str, Any]], is_hebrew: bool) -> str:
-    """Format suggestions as numbered list."""
-    priority_labels = {
-        "low": "נמוכה" if is_hebrew else "low",
-        "medium": "בינונית" if is_hebrew else "medium",
-        "high": "גבוהה" if is_hebrew else "high",
-        "urgent": "דחופה" if is_hebrew else "urgent",
-    }
-    
-    lines = [summary, ""]
-    for i, s in enumerate(suggestions, 1):
-        p = priority_labels.get(s.get("priority", "medium"), s.get("priority", ""))
-        lines.append(f"{i}. {s['title']} ({p})")
-    
-    cta = "\nבחר 1-{} להוספה" if is_hebrew else "\nChoose 1-{} to add"
-    lines.append(cta.format(len(suggestions)))
-    
-    return "\n".join(lines)
+    """Format reply with summary + CTA only. Numbered list rendered by UI."""
+    cta = "בחר 1-{} להוספה" if is_hebrew else "Choose 1-{} to add"
+    return f"{summary}\n\n{cta.format(len(suggestions))}"
 
 
 async def call_chatbot_service(message: str, user_id: str, tasks: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

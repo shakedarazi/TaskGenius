@@ -45,7 +45,7 @@ class TestFormatReply:
     """Tests for reply formatting."""
 
     def test_format_english(self):
-        """Should format suggestions in English."""
+        """Should format reply with summary + CTA only (no numbered list)."""
         suggestions = [
             {"title": "Task 1", "priority": "high"},
             {"title": "Task 2", "priority": "low"},
@@ -53,20 +53,21 @@ class TestFormatReply:
         reply = format_reply("Here are your tasks.", suggestions, is_hebrew=False)
         
         assert "Here are your tasks." in reply
-        assert "1. Task 1 (high)" in reply
-        assert "2. Task 2 (low)" in reply
         assert "Choose 1-2 to add" in reply
+        # Numbered list should NOT be in reply (rendered by UI instead)
+        assert "1. Task 1" not in reply
 
     def test_format_hebrew(self):
-        """Should format suggestions in Hebrew."""
+        """Should format reply with summary + CTA only (Hebrew)."""
         suggestions = [
             {"title": "משימה 1", "priority": "high"},
         ]
         reply = format_reply("הנה המשימות שלך.", suggestions, is_hebrew=True)
         
         assert "הנה המשימות שלך." in reply
-        assert "משימה 1 (גבוהה)" in reply
         assert "בחר 1-1 להוספה" in reply
+        # Numbered list should NOT be in reply
+        assert "1. משימה 1" not in reply
 
 
 class TestChatEndpoint:
