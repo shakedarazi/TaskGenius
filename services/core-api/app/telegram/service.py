@@ -10,9 +10,8 @@ from app.telegram.repository import (
 )
 from app.auth.repository import MongoUserRepository
 from app.telegram.schemas import TelegramUpdate, TelegramMessage
-from app.chat.service import ChatService
+from app.chat.service import process_message
 from app.tasks.repository import TaskRepositoryInterface
-from app.chat.schemas import ChatResponse
 
 
 class TelegramService:
@@ -26,7 +25,6 @@ class TelegramService:
     ):
         self.db = db
         self.telegram_adapter = TelegramAdapter()
-        self.chat_service = ChatService(db)
         self.user_repository = user_repository
         self.verification_repository = verification_repository
         self.update_repository = update_repository
@@ -87,9 +85,10 @@ class TelegramService:
                 pass
 
         # Route through existing chat flow
-        chat_response = await self.chat_service.process_message(
+        chat_response = await process_message(
             user_id=app_user_id,
             message=message_text,
+            selection=None,
             task_repository=task_repository,
         )
 

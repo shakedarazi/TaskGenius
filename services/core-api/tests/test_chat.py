@@ -1,12 +1,72 @@
 """
-TASKGENIUS Core API - Chat Tests
-
-Phase 4: CI-safe tests for chat endpoint.
+Core API - Chat Tests
+Tests for suggestion-based chat endpoint.
 """
-
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-from app.chat.service import ChatService
+from app.chat.service import (
+    get_cached_suggestions,
+    set_cached_suggestions,
+    clear_cached_suggestions,
+    format_reply,
+)
+
+
+class TestSuggestionCache:
+    """Tests for suggestion caching."""
+
+    def test_cache_set_and_get(self):
+        """Should store and retrieve suggestions."""
+        suggestions = [{"title": "Task 1", "priority": "high"}]
+        set_cached_suggestions("user-1", suggestions)
+        
+        cached = get_cached_suggestions("user-1")
+        assert cached == suggestions
+
+    def test_cache_clear(self):
+        """Should clear suggestions after retrieval."""
+        suggestions = [{"title": "Task 1", "priority": "high"}]
+        set_cached_suggestions("user-1", suggestions)
+        clear_cached_suggestions("user-1")
+        
+        cached = get_cached_suggestions("user-1")
+        assert cached is None
+
+    def test_cache_isolation(self):
+        """Suggestions should be isolated per user."""
+        set_cached_suggestions("user-1", [{"title": "Task 1"}])
+        set_cached_suggestions("user-2", [{"title": "Task 2"}])
+        
+        assert get_cached_suggestions("user-1")[0]["title"] == "Task 1"
+        assert get_cached_suggestions("user-2")[0]["title"] == "Task 2"
+
+
+class TestFormatReply:
+    """Tests for reply formatting."""
+
+    def test_format_english(self):
+        """Should format suggestions in English."""
+        suggestions = [
+            {"title": "Task 1", "priority": "high"},
+            {"title": "Task 2", "priority": "low"},
+        ]
+        reply = format_reply("Here are your tasks.", suggestions, is_hebrew=False)
+        
+        assert "Here are your tasks." in reply
+        assert "1. Task 1 (high)" in reply
+        assert "2. Task 2 (low)" in reply
+        assert "Choose 1-2 to add" in reply
+
+    def test_format_hebrew(self):
+        """Should format suggestions in Hebrew."""
+        suggestions = [
+            {"title": "משימה 1", "priority": "high"},
+        ]
+        reply = format_reply("הנה המשימות שלך.", suggestions, is_hebrew=True)
+        
+        assert "הנה המשימות שלך." in reply
+        assert "משימה 1 (גבוהה)" in reply
+        assert "בחר 1-1 להוספה" in reply
 
 
 class TestChatEndpoint:
@@ -17,119 +77,37 @@ class TestChatEndpoint:
         response = client.post("/chat", json={"message": "hello"})
         assert response.status_code == 401
 
-    @patch("app.chat.service.httpx.AsyncClient")
-    def test_chat_calls_chatbot_service(self, mock_client_class, client, auth_headers, task_repository):
-        """Chat endpoint should call chatbot-service with user data."""
-        import asyncio
-        
-        # Mock chatbot-service response (httpx response is not async)
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "reply": "You have 2 tasks",
-            "intent": "list_tasks",
-            "suggestions": ["View all", "Create new"],
+    def test_chat_requires_message_or_selection(self, client, auth_headers):
+        """Chat endpoint requires either message or selection."""
+        response = client.post("/chat", json={}, headers=auth_headers)
+        assert response.status_code == 400
+
+    @patch("app.chat.service.call_chatbot_service")
+    async def test_chat_returns_suggestions(self, mock_call, client, auth_headers):
+        """Chat should return suggestions from chatbot-service."""
+        mock_call.return_value = {
+            "summary": "Test summary",
+            "suggestions": [
+                {"title": "Task 1", "priority": "high"},
+                {"title": "Task 2", "priority": "medium"},
+            ]
         }
-        mock_response.raise_for_status = MagicMock()
         
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client_class.return_value = mock_client
-        
-        # Get actual user_id from registered user
-        from tests.conftest import user_repository
-        registered_user = user_repository.get_by_username("testuser")
-        actual_user_id = registered_user.id if registered_user else "test-user-id"
-        
-        # Create some tasks for the user (async setup)
-        async def setup_tasks():
-            from app.tasks.models import Task
-            from app.tasks.enums import TaskStatus, TaskPriority
-            
-            task1 = Task.create(
-                owner_id=actual_user_id,
-                title="Task 1",
-                status=TaskStatus.OPEN,
-                priority=TaskPriority.HIGH,
-            )
-            task2 = Task.create(
-                owner_id=actual_user_id,
-                title="Task 2",
-                status=TaskStatus.DONE,
-                priority=TaskPriority.MEDIUM,
-            )
-            await task_repository.create(task1)
-            await task_repository.create(task2)
-        
-        asyncio.run(setup_tasks())
-        
-        # Call chat endpoint
         response = client.post(
             "/chat",
-            json={"message": "list my tasks"},
+            json={"message": "I need to prepare"},
             headers=auth_headers,
         )
         
         assert response.status_code == 200
         data = response.json()
         assert "reply" in data
-        assert data["reply"] == "You have 2 tasks"
-        
-        # Verify chatbot-service was called
-        assert mock_client.post.called
-        call_args = mock_client.post.call_args
-        assert "/interpret" in call_args[0][0]
-        
-        # Verify user data was included
-        request_data = call_args[1]["json"]
-        assert request_data["user_id"] == actual_user_id
-        assert len(request_data["tasks"]) == 2
+        assert "suggestions" in data
 
-    @patch("app.chat.service.httpx.AsyncClient")
-    def test_chat_includes_weekly_summary_when_requested(
-        self, mock_client_class, client, auth_headers, task_repository
-    ):
-        """Chat endpoint should include weekly summary when user asks for it."""
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "reply": "Here's your summary",
-            "intent": "get_insights",
-        }
-        mock_response.raise_for_status = MagicMock()
-        
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.post = AsyncMock(return_value=mock_response)
-        mock_client_class.return_value = mock_client
-        
-        response = client.post(
-            "/chat",
-            json={"message": "show me my weekly summary"},
-            headers=auth_headers,
-        )
-        
-        assert response.status_code == 200
-        
-        # Verify weekly_summary was included in request
-        call_args = mock_client.post.call_args
-        request_data = call_args[1]["json"]
-        assert "weekly_summary" in request_data
-        assert request_data["weekly_summary"] is not None
-
-    @patch("app.chat.service.httpx.AsyncClient")
-    def test_chat_handles_chatbot_service_unavailable(
-        self, mock_client_class, client, auth_headers
-    ):
-        """Chat endpoint should handle chatbot-service unavailability gracefully."""
-        import httpx
-        
-        mock_client = AsyncMock()
-        mock_client.__aenter__.return_value = mock_client
-        mock_client.__aexit__.return_value = None
-        mock_client.post = AsyncMock(side_effect=httpx.HTTPError("Connection error"))
-        mock_client_class.return_value = mock_client
+    @patch("app.chat.service.call_chatbot_service")
+    def test_chat_handles_service_failure(self, mock_call, client, auth_headers):
+        """Chat should handle chatbot-service failure gracefully."""
+        mock_call.return_value = None  # Service failed
         
         response = client.post(
             "/chat",
@@ -140,59 +118,4 @@ class TestChatEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert "reply" in data
-        # Should have fallback message
-        assert len(data["reply"]) > 0
-
-    def test_chat_ownership_isolation(self, client, auth_headers, second_auth_headers, task_repository):
-        """Chat should only include tasks for the authenticated user."""
-        import asyncio
-        from app.tasks.models import Task
-        from app.tasks.enums import TaskStatus, TaskPriority
-        
-        async def setup_tasks():
-            # User A's task
-            task_a = Task.create(
-                owner_id="user-a-id",
-                title="User A Task",
-                status=TaskStatus.OPEN,
-                priority=TaskPriority.HIGH,
-            )
-            await task_repository.create(task_a)
-            
-            # User B's task
-            task_b = Task.create(
-                owner_id="user-b-id",
-                title="User B Task",
-                status=TaskStatus.OPEN,
-                priority=TaskPriority.HIGH,
-            )
-            await task_repository.create(task_b)
-        
-        asyncio.run(setup_tasks())
-        
-        # Mock chatbot-service to capture request
-        with patch("app.chat.service.httpx.AsyncClient") as mock_client_class:
-            mock_response = MagicMock()
-            mock_response.json.return_value = {"reply": "Response", "intent": "list_tasks"}
-            mock_response.raise_for_status = MagicMock()
-            
-            mock_client = AsyncMock()
-            mock_client.__aenter__.return_value = mock_client
-            mock_client.__aexit__.return_value = None
-            mock_client.post = AsyncMock(return_value=mock_response)
-            mock_client_class.return_value = mock_client
-            
-            # User A calls chat
-            response = client.post(
-                "/chat",
-                json={"message": "list tasks"},
-                headers=auth_headers,
-            )
-            
-            assert response.status_code == 200
-            
-            # Verify only User A's tasks were sent
-            call_args = mock_client.post.call_args
-            request_data = call_args[1]["json"]
-            # Note: In real test, we'd need to verify the actual user_id from JWT
-            # For now, we verify the endpoint works and ownership is enforced by repository
+        assert "Failed" in data["reply"] or "לא הצלחתי" in data["reply"]
