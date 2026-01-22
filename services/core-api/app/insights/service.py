@@ -1,10 +1,3 @@
-"""
-TASKGENIUS Core API - Insights Service
-
-Business logic for computing weekly insights from task data.
-This is a deterministic, side-effect free computation.
-"""
-
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
@@ -22,15 +15,6 @@ from app.insights.schemas import (
 
 
 class InsightsService:
-    """
-    Service for computing weekly insights.
-    
-    All computations are:
-    - Read-only (no mutations)
-    - Deterministic (same input -> same output)
-    - User-scoped (only processes authenticated user's tasks)
-    """
-
     def __init__(self):
         pass  # Pure logic, no dependencies needed
 
@@ -51,11 +35,6 @@ class InsightsService:
         tasks: List[Task],
         since: datetime,
     ) -> List[Task]:
-        """
-        Filter tasks completed within the time window.
-        
-        Completed = status is DONE and updated_at is after 'since'.
-        """
         completed = []
         for task in tasks:
             if task.status == TaskStatus.DONE:
@@ -68,12 +47,6 @@ class InsightsService:
         return completed
 
     def _filter_high_priority_open_tasks(self, tasks: List[Task]) -> List[Task]:
-        """
-        Filter open tasks with HIGH or URGENT priority.
-        
-        Open = status is OPEN or IN_PROGRESS.
-        High priority = priority is HIGH or URGENT.
-        """
         high_priority = []
         open_statuses = (TaskStatus.OPEN, TaskStatus.IN_PROGRESS)
         high_priorities = (TaskPriority.HIGH, TaskPriority.URGENT)
@@ -89,11 +62,6 @@ class InsightsService:
         now: datetime,
         lookahead_days: int = 7,
     ) -> List[Task]:
-        """
-        Filter tasks due within the next N days.
-        
-        Upcoming = has deadline within lookahead window AND status is not DONE/CANCELED.
-        """
         upcoming = []
         cutoff = now + timedelta(days=lookahead_days)
         excluded_statuses = (TaskStatus.DONE, TaskStatus.CANCELED)
@@ -115,11 +83,6 @@ class InsightsService:
         return upcoming
 
     def _filter_overdue_tasks(self, tasks: List[Task], now: datetime) -> List[Task]:
-        """
-        Filter overdue tasks.
-        
-        Overdue = deadline passed AND status is not DONE/CANCELED.
-        """
         overdue = []
         excluded_statuses = (TaskStatus.DONE, TaskStatus.CANCELED)
         
@@ -143,25 +106,6 @@ class InsightsService:
         tasks: List[Task],
         now: datetime,
     ) -> WeeklySummary:
-        """
-        Generate a weekly insights summary from a list of tasks.
-        
-        Per docs/insights_weekly_summary_spec.md:
-        - Completed tasks (last 7 days)
-        - Open high-priority tasks
-        - Tasks due within next 7 days
-        - Overdue tasks
-        
-        This is a deterministic, side-effect free computation.
-        No data is modified; this is purely a read operation.
-        
-        Args:
-            tasks: List of tasks to analyze (should be user-scoped)
-            now: Reference time for calculations (injected, not datetime.now())
-        
-        Returns:
-            WeeklySummary with all required sections
-        """
         # Time boundaries
         period_start = now - timedelta(days=7)
         period_end = now + timedelta(days=7)

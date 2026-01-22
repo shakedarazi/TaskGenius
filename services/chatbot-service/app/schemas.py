@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Chatbot Service - Schemas
-
-Pydantic models for chatbot request/response.
-"""
-
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
@@ -55,11 +49,6 @@ class ChatRequest(BaseModel):
 
 
 class Command(BaseModel):
-    """
-    Structured command from chatbot (optional).
-    
-    Phase 3: Structured output for machine-readable actions.
-    """
     intent: str = Field(description="Command intent: add_task|update_task|delete_task|complete_task|list_tasks|clarify")
     confidence: float = Field(ge=0.0, le=1.0, description="Confidence score (0.0-1.0)")
     fields: Optional[Dict[str, Any]] = Field(default=None, description="Extracted fields for add_task (title, priority, deadline, etc.)")

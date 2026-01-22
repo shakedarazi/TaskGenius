@@ -1,12 +1,5 @@
-"""
-TASKGENIUS Core API - Chat Schemas
-
-Pydantic models for chat API endpoints.
-"""
-
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
-
 
 class ChatRequest(BaseModel):
     """Request model for chat endpoint."""

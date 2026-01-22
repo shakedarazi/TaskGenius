@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Telegram Weekly Summary Scheduler
-
-Simple async scheduler for weekly Telegram summaries.
-"""
-
 import asyncio
 import logging
 from datetime import datetime, timezone

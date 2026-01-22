@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Telegram Schemas
-
-Pydantic models for Telegram webhook payloads and responses.
-"""
-
 from typing import Optional
 from pydantic import BaseModel, Field
 
@@ -71,13 +65,11 @@ class TelegramStatusResponse(BaseModel):
 
 class TelegramNotificationsToggleRequest(BaseModel):
     """Request body to enable/disable Telegram notifications."""
-
     enabled: bool = Field(description="Enable or disable Telegram notifications")
 
 
 class TelegramUnlinkResponse(BaseModel):
     """Response after unlinking Telegram account."""
-
     unlinked: bool = Field(description="Whether unlinking succeeded")
 
 

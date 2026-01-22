@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Authentication Router
-
-Endpoints for user registration, login, and current user info.
-"""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -43,12 +37,6 @@ async def register(
     request: UserRegisterRequest,
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> MessageResponse:
-    """
-    Register a new user with username and password.
-    
-    - Username must be 3-50 characters, alphanumeric with underscores
-    - Password must be 8-128 characters
-    """
     user = await auth_service.register_user(
         username=request.username,
         password=request.password,
@@ -72,12 +60,6 @@ async def login(
     request: UserLoginRequest,
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> TokenResponse:
-    """
-    Authenticate user and return JWT access token.
-    
-    Use the returned token in the Authorization header:
-    `Authorization: Bearer <token>`
-    """
     user = await auth_service.authenticate_user(
         username=request.username,
         password=request.password,
@@ -101,11 +83,6 @@ async def login(
     summary="Get current user info",
 )
 async def get_me(current_user: CurrentUser) -> UserResponse:
-    """
-    Get the current authenticated user's public information.
-    
-    Requires a valid JWT token in the Authorization header.
-    """
     return UserResponse(
         id=current_user.id,
         username=current_user.username,

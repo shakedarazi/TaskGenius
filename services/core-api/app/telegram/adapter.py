@@ -1,10 +1,4 @@
-"""
-TASKGENIUS Core API - Telegram Adapter
-
-Adapter for sending messages via Telegram Bot API.
-This adapter is mockable for CI-safe testing.
-"""
-
+import logging
 import httpx
 from typing import Optional
 
@@ -13,22 +7,9 @@ from app.telegram.schemas import TelegramSendMessageRequest, TelegramSendMessage
 
 
 class TelegramAdapter:
-    """
-    Adapter for Telegram Bot API communication.
-    
-    This adapter:
-    - Sends messages via Telegram Bot API
-    - Is fully mockable for testing
-    - Handles missing token gracefully (for CI)
-    """
 
     def __init__(self, bot_token: Optional[str] = None):
-        """
-        Initialize Telegram adapter.
-        
-        Args:
-            bot_token: Telegram bot token (defaults to TELEGRAM_BOT_TOKEN from settings)
-        """
+
         self.bot_token = bot_token or settings.TELEGRAM_BOT_TOKEN
         self.api_base_url = "https://api.telegram.org"
 
@@ -38,21 +19,7 @@ class TelegramAdapter:
         text: str,
         parse_mode: Optional[str] = None,
     ) -> TelegramSendMessageResponse:
-        """
-        Send a message via Telegram Bot API.
-        
-        Args:
-            chat_id: Telegram chat ID
-            text: Message text
-            parse_mode: Optional parse mode (HTML, Markdown, etc.)
-        
-        Returns:
-            TelegramSendMessageResponse
-        
-        Raises:
-            ValueError: If bot token is not configured
-            httpx.HTTPError: If API call fails
-        """
+
         if not self.bot_token:
             # In tests, this should be mocked, but we handle gracefully
             return TelegramSendMessageResponse(

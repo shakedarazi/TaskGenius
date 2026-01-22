@@ -1,11 +1,3 @@
-"""
-TASKGENIUS Core API - Telegram Repository
-
-MongoDB repositories for Telegram-related persistence:
-- UserTelegramLink mappings
-- TelegramVerificationCode (linking codes)
-- ProcessedTelegramUpdate (webhook idempotency)
-"""
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
@@ -21,8 +13,6 @@ from app.telegram.models import (
 
 
 class UserTelegramLinkRepositoryInterface(ABC):
-    """Abstract interface for persistent user ↔ Telegram mappings."""
-
     @abstractmethod
     async def get_by_telegram_user_id(self, telegram_user_id: int) -> Optional[UserTelegramLink]:
         pass
@@ -39,23 +29,18 @@ class UserTelegramLinkRepositoryInterface(ABC):
         telegram_chat_id: int,
         telegram_username: Optional[str],
     ) -> UserTelegramLink:
-        """Create or update mapping for a given user/telegram pair."""
         pass
 
     @abstractmethod
     async def delete_for_user(self, user_id: str) -> None:
-        """Remove Telegram mapping for a given application user."""
         pass
 
     @abstractmethod
     async def set_notifications_enabled(self, user_id: str, enabled: bool) -> None:
-        """Toggle Telegram notifications for a given user."""
         pass
 
 
 class MongoUserTelegramLinkRepository(UserTelegramLinkRepositoryInterface):
-    """MongoDB implementation for user ↔ Telegram mappings."""
-
     COLLECTION_NAME = "user_telegram_links"
 
     def __init__(self, db: AsyncIOMotorDatabase):
@@ -118,8 +103,6 @@ class MongoUserTelegramLinkRepository(UserTelegramLinkRepositoryInterface):
 
 
 class TelegramVerificationRepositoryInterface(ABC):
-    """Abstract interface for Telegram verification codes."""
-
     @abstractmethod
     async def create_code(
         self,
@@ -131,7 +114,6 @@ class TelegramVerificationRepositoryInterface(ABC):
 
     @abstractmethod
     async def get_valid_code(self, code: str) -> Optional[TelegramVerificationCode]:
-        """Return a non-expired, unused code if it exists."""
         pass
 
     @abstractmethod
@@ -140,8 +122,6 @@ class TelegramVerificationRepositoryInterface(ABC):
 
 
 class MongoTelegramVerificationRepository(TelegramVerificationRepositoryInterface):
-    """MongoDB implementation for Telegram verification codes."""
-
     COLLECTION_NAME = "telegram_verification_codes"
 
     def __init__(self, db: AsyncIOMotorDatabase):
@@ -194,8 +174,6 @@ class MongoTelegramVerificationRepository(TelegramVerificationRepositoryInterfac
 
 
 class TelegramUpdateRepositoryInterface(ABC):
-    """Abstract interface for webhook idempotency based on update_id."""
-
     @abstractmethod
     async def is_processed(self, update_id: int) -> bool:
         pass
@@ -206,8 +184,6 @@ class TelegramUpdateRepositoryInterface(ABC):
 
 
 class MongoTelegramUpdateRepository(TelegramUpdateRepositoryInterface):
-    """MongoDB implementation for processed Telegram updates."""
-
     COLLECTION_NAME = "telegram_processed_updates"
 
     def __init__(self, db: AsyncIOMotorDatabase):

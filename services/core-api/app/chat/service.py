@@ -24,15 +24,6 @@ logger = logging.getLogger(__name__)
 
 
 class ChatService:
-    """
-    Service for chat orchestration.
-    
-    Orchestrates:
-    - Data fetching from MongoDB (via repository)
-    - Communication with chatbot-service
-    - Response formatting
-    """
-
     def __init__(self, db: AsyncIOMotorDatabase):
         self.db = db
         self.chatbot_service_url = settings.CHATBOT_SERVICE_URL
@@ -46,21 +37,6 @@ class ChatService:
         task_repository: TaskRepositoryInterface,
         conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> ChatResponse:
-        """
-        Process a chat message by:
-        1. Fetching user's tasks
-        2. Optionally fetching weekly summary if requested
-        3. Calling chatbot-service with context
-        4. Returning response
-        
-        Args:
-            user_id: Authenticated user ID
-            message: User's chat message
-            task_repository: Task repository for fetching user tasks
-        
-        Returns:
-            ChatResponse from chatbot-service
-        """
         # Fetch user's tasks (ownership enforced by repository)
         tasks = await task_repository.list_by_owner(user_id)
         

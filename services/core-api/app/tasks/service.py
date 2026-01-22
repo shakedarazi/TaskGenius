@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Task Service
-
-Business logic for task operations including urgency computation.
-"""
-
 from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Callable
 
@@ -14,20 +8,11 @@ from app.tasks.schemas import TaskCreateRequest, TaskUpdateRequest, TaskResponse
 
 
 class TaskService:
-    """Service layer for task business logic."""
-
     def __init__(
         self,
         repository: TaskRepositoryInterface,
         clock: Optional[Callable[[], datetime]] = None,
     ):
-        """
-        Initialize the task service.
-        
-        Args:
-            repository: Task repository implementation
-            clock: Optional clock function for testing (returns current datetime)
-        """
         self.repository = repository
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
@@ -40,16 +25,6 @@ class TaskService:
         task: Task,
         now: Optional[datetime] = None,
     ) -> UrgencyLevel:
-        """
-        Compute derived urgency level from task deadline and current time.
-        
-        Urgency classification per docs/requirements.en.md:
-        - NO_DEADLINE: deadline is missing
-        - OVERDUE: deadline passed AND status is not DONE/CANCELED
-        - DUE_TODAY: deadline is today
-        - DUE_SOON: deadline within next 7 days
-        - NOT_SOON: deadline more than 7 days away
-        """
         if task.deadline is None:
             return UrgencyLevel.NO_DEADLINE
 
@@ -85,7 +60,6 @@ class TaskService:
         return UrgencyLevel.NOT_SOON
 
     def _task_to_response(self, task: Task) -> TaskResponse:
-        """Convert a Task model to TaskResponse with computed urgency."""
         return TaskResponse(
             id=task.id,
             owner_id=task.owner_id,
@@ -106,7 +80,6 @@ class TaskService:
         owner_id: str,
         request: TaskCreateRequest,
     ) -> TaskResponse:
-        """Create a new task for the owner."""
         task = Task.create(
             owner_id=owner_id,
             title=request.title,
@@ -121,7 +94,6 @@ class TaskService:
         return self._task_to_response(task)
 
     async def get_task(self, task_id: str, owner_id: str) -> Optional[TaskResponse]:
-        """Get a task by ID, scoped to owner."""
         task = await self.repository.get_by_id(task_id, owner_id)
         if task is None:
             return None
@@ -136,7 +108,6 @@ class TaskService:
         exclude_statuses: Optional[List[TaskStatus]] = None,
         completed_since: Optional[datetime] = None,
     ) -> List[TaskResponse]:
-        """List tasks for owner with optional filters."""
         tasks = await self.repository.list_by_owner(
             owner_id=owner_id,
             status=status,
@@ -153,7 +124,6 @@ class TaskService:
         owner_id: str,
         request: TaskUpdateRequest,
     ) -> Optional[TaskResponse]:
-        """Update a task, scoped to owner."""
         # Build updates dict from non-None fields
         updates = {}
         if request.title is not None:

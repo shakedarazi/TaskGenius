@@ -1,10 +1,3 @@
-"""
-TASKGENIUS Core API - Insights Router
-
-API endpoints for weekly insights.
-All endpoints are JWT-protected and user-scoped.
-"""
-
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -33,17 +26,6 @@ async def get_weekly_summary(
     task_repository: Annotated[TaskRepositoryInterface, Depends(get_task_repository)],
     insights_service: Annotated[InsightsService, Depends(get_insights_service)],
 ) -> WeeklySummary:
-    """
-    Get weekly insights summary for the authenticated user.
-    
-    Per docs/insights_weekly_summary_spec.md:
-    - Completed tasks (last 7 days)
-    - Open high-priority tasks
-    - Tasks due within next 7 days
-    - Overdue tasks
-    
-    This is a read-only operation with no side effects.
-    """
     # Fetch all tasks for the user (ownership enforced by repository)
     from app.tasks.repository import TaskRepositoryInterface
     tasks = await task_repository.list_by_owner(current_user.id)

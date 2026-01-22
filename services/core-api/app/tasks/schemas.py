@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Task Schemas
-
-Pydantic models for task API requests and responses.
-"""
-
 from datetime import datetime
 from typing import Optional, List
 

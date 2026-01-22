@@ -1,8 +1,3 @@
-"""
-TASKGENIUS Core API - User Model
-
-Internal user model for authentication.
-"""
 
 from dataclasses import dataclass, field
 from datetime import datetime, timezone

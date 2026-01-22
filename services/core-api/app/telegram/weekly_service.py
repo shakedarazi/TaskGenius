@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Telegram Weekly Summary Service
-
-Service for sending weekly Telegram summaries to users.
-"""
-
 import logging
 from datetime import datetime, timedelta, timezone, date
 
@@ -20,8 +14,6 @@ logger = logging.getLogger(__name__)
 
 
 class TelegramWeeklySummaryService:
-    """Service for sending weekly Telegram summaries."""
-
     def __init__(
         self,
         db: AsyncIOMotorDatabase,
@@ -92,21 +84,6 @@ class TelegramWeeklySummaryService:
         return "\n".join(lines)
 
     async def send_weekly_summaries_for_all_users(self) -> None:
-        """
-        Main job: Send weekly summaries to all eligible users.
-
-        Steps:
-        1. Get all users with notifications_enabled=True
-        2. For each user:
-           a. Get week_start (Monday of current week)
-           b. Check if already sent (idempotency)
-           c. If not sent:
-              - Fetch user's tasks
-              - Generate summary
-              - Format as text
-              - Send via Telegram
-              - Mark as sent
-        """
         now = datetime.now(timezone.utc)
         week_start = self._get_week_start(now)
 
@@ -157,22 +134,6 @@ class TelegramWeeklySummaryService:
             logger.error(f"Error in weekly summary job: {e}", exc_info=True)
 
     async def send_summary_for_user(self, user_id: str) -> tuple[bool, str]:
-        """
-        Send weekly summary to a specific user on-demand (manual trigger).
-        
-        This method:
-        - Does NOT check idempotency (allows multiple sends)
-        - Fetches user's tasks
-        - Generates summary
-        - Sends via Telegram
-        - Does NOT mark as sent in summary_repo (to allow manual re-sends)
-        
-        Args:
-            user_id: The user ID to send summary for
-            
-        Returns:
-            Tuple of (success: bool, message: str)
-        """
         try:
             # Get user
             user = await self.user_repo.get_by_id(user_id)

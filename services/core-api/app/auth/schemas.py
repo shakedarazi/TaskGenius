@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Authentication Schemas
-
-Pydantic models for authentication requests and responses.
-"""
-
 from datetime import datetime
 from typing import Optional
 

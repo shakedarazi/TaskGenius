@@ -1,10 +1,3 @@
-"""
-TASKGENIUS Core API - Telegram Weekly Summary Repository
-
-Repository for tracking sent weekly Telegram summaries.
-Prevents duplicate sends within the same week.
-"""
-
 from abc import ABC, abstractmethod
 from datetime import date, datetime, timezone
 from typing import Optional

@@ -1,10 +1,3 @@
-"""
-TASKGENIUS Core API - Chat Router
-
-API endpoints for chat interactions.
-All endpoints are JWT-protected and user-scoped.
-"""
-
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -35,17 +28,6 @@ async def chat(
     chat_service: Annotated[ChatService, Depends(get_chat_service)],
     task_repository: Annotated[TaskRepositoryInterface, Depends(get_task_repository)],
 ) -> ChatResponse:
-    """
-    Process a chat message and return conversational response.
-    
-    This endpoint:
-    - Validates user identity (JWT)
-    - Fetches user's tasks from MongoDB
-    - Calls chatbot-service with context
-    - Returns conversational response
-    
-    No mutations occur during this flow.
-    """
     return await chat_service.process_message(
         user_id=current_user.id,
         message=request.message,

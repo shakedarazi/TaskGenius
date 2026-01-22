@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Authentication Dependencies
-
-FastAPI dependencies for JWT validation and user context.
-"""
-
 from typing import Annotated, Optional
 
 from fastapi import Depends, HTTPException, status
@@ -32,14 +26,6 @@ async def get_current_user(
     credentials: Annotated[Optional[HTTPAuthorizationCredentials], Depends(bearer_scheme)],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> User:
-    """
-    Dependency to get the current authenticated user from JWT token.
-    
-    Usage:
-        @app.get("/protected")
-        async def protected_route(current_user: User = Depends(get_current_user)):
-            return {"user_id": current_user.id}
-    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -52,7 +38,6 @@ async def get_current_user(
     token = credentials.credentials
     
     # Create temporary AuthService just for token decoding (synchronous operation)
-    # We don't need database for this, so we can use a dummy repository
     from app.auth.service import AuthService
     from app.auth.repository import UserRepositoryInterface
     

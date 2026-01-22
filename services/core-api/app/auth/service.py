@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Authentication Service
-
-Business logic for authentication operations.
-"""
-
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 

@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Chatbot Service - Configuration Module
-
-This module handles application configuration via environment variables.
-"""
-
 import os
 from typing import Optional
 
@@ -27,6 +21,7 @@ class Settings:
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY", None)
     MODEL_NAME: str = os.getenv("MODEL_NAME", "gpt-4o-mini")
     USE_LLM: bool = os.getenv("USE_LLM", "false").lower() == "true"
+    LLM_MODE: str = os.getenv("LLM_MODE", "nlg_only")
     LLM_TIMEOUT: float = float(os.getenv("LLM_TIMEOUT", "10.0"))
 
     # Logging

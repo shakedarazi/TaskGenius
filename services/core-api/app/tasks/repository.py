@@ -1,27 +1,11 @@
-"""
-TASKGENIUS Core API - Task Repository
-
-Repository pattern for task data access.
-Includes MongoDB implementation for runtime and interface for testing.
-"""
-
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 from typing import Optional, List
-
 from motor.motor_asyncio import AsyncIOMotorDatabase
-
 from app.tasks.models import Task
 from app.tasks.enums import TaskStatus
 
-
 class TaskRepositoryInterface(ABC):
-    """
-    Abstract interface for task repository.
-
-    Enables swapping implementations (MongoDB for runtime, in-memory for tests).
-    All operations are scoped by owner_id to enforce ownership isolation.
-    """
 
     @abstractmethod
     async def create(self, task: Task) -> Task:
@@ -58,12 +42,6 @@ class TaskRepositoryInterface(ABC):
 
 
 class TaskRepository(TaskRepositoryInterface):
-    """
-    MongoDB implementation of the task repository.
-
-    All queries are scoped by owner_id to enforce ownership isolation.
-    Only core-api may access MongoDB per architecture constraints.
-    """
 
     COLLECTION_NAME = "tasks"
 
@@ -146,10 +124,6 @@ class TaskRepository(TaskRepositoryInterface):
 
 
 class InMemoryTaskRepository(TaskRepositoryInterface):
-    """
-    In-memory implementation for CI-safe testing.
-    """
-
     def __init__(self):
         self._tasks: dict[str, Task] = {}
 

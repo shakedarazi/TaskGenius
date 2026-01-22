@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Telegram Models
-
-Internal models for Telegram-related persistence.
-"""
-
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
@@ -17,12 +11,6 @@ def _utcnow() -> datetime:
 
 @dataclass
 class UserTelegramLink:
-    """
-    Persistent mapping between application user and Telegram identity.
-
-    This model is stored in MongoDB in the `user_telegram_links` collection.
-    """
-
     id: str
     user_id: str
     telegram_user_id: int
@@ -52,12 +40,6 @@ class UserTelegramLink:
 
 @dataclass
 class TelegramVerificationCode:
-    """
-    Short-lived verification code used to link a logged-in user to a Telegram account.
-
-    Stored in MongoDB in the `telegram_verification_codes` collection.
-    """
-
     id: str
     user_id: str
     code: str
@@ -76,12 +58,6 @@ class TelegramVerificationCode:
 
 @dataclass
 class ProcessedTelegramUpdate:
-    """
-    Idempotency record for processed Telegram webhook updates.
-
-    Stored in MongoDB in the `telegram_processed_updates` collection.
-    """
-
     id: str
     update_id: int
     telegram_user_id: int

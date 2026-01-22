@@ -1,10 +1,3 @@
-"""
-TASKGENIUS Core API - Task Router
-
-CRUD endpoints for task management.
-All endpoints are JWT-protected and user-scoped.
-"""
-
 from datetime import datetime
 from typing import Optional, Annotated
 
@@ -31,14 +24,12 @@ router = APIRouter(prefix="/tasks", tags=["Tasks"])
 async def get_task_repository(
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
 ) -> TaskRepositoryInterface:
-    """Dependency to get task repository instance."""
     return TaskRepository(db)
 
 
 async def get_task_service(
     repository: Annotated[TaskRepositoryInterface, Depends(get_task_repository)]
 ) -> TaskService:
-    """Dependency to get task service instance."""
     return TaskService(repository)
 
 
@@ -53,11 +44,6 @@ async def create_task(
     current_user: CurrentUser,
     service: Annotated[TaskService, Depends(get_task_service)],
 ) -> TaskResponse:
-    """
-    Create a new task for the authenticated user.
-    
-    The task is automatically associated with the current user.
-    """
     return await service.create_task(
         owner_id=current_user.id,
         request=request,
@@ -94,15 +80,6 @@ async def list_tasks(
         description="For DONE tasks: return only tasks with updated_at >= completed_since",
     ),
 ) -> TaskListResponse:
-    """
-    Contract:
-    - Default (no params): ACTIVE only (excludes DONE/CANCELED)
-    - If completed_since is provided:
-        - include_closed must be true
-        - status must be DONE (explicitly or implicitly)
-    """
-
-
     if completed_since is not None and status_filter not in (None, TaskStatus.DONE):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -141,11 +118,6 @@ async def get_task(
     current_user: CurrentUser,
     service: Annotated[TaskService, Depends(get_task_service)],
 ) -> TaskResponse:
-    """
-    Get a specific task by ID.
-    
-    Returns 404 if the task doesn't exist or belongs to another user.
-    """
     task = await service.get_task(task_id, current_user.id)
     if task is None:
         raise HTTPException(
@@ -166,12 +138,6 @@ async def update_task(
     current_user: CurrentUser,
     service: Annotated[TaskService, Depends(get_task_service)],
 ) -> TaskResponse:
-    """
-    Update a task by ID.
-    
-    Only provided fields will be updated.
-    Returns 404 if the task doesn't exist or belongs to another user.
-    """
     task = await service.update_task(task_id, current_user.id, request)
     if task is None:
         raise HTTPException(
@@ -191,11 +157,6 @@ async def delete_task(
     current_user: CurrentUser,
     service: Annotated[TaskService, Depends(get_task_service)],
 ) -> TaskDeleteResponse:
-    """
-    Delete a task by ID.
-    
-    Returns 404 if the task doesn't exist or belongs to another user.
-    """
     deleted = await service.delete_task(task_id, current_user.id)
     if not deleted:
         raise HTTPException(

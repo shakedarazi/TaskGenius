@@ -1,11 +1,4 @@
-"""
-TASKGENIUS Core API - Telegram Router
-
-API endpoints for Telegram webhook integration.
-"""
-
 from typing import Annotated
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -58,16 +51,6 @@ async def telegram_webhook(
     telegram_service: Annotated[TelegramService, Depends(get_telegram_service)],
     task_repository: Annotated[TaskRepositoryInterface, Depends(get_task_repository)],
 ) -> dict:
-    """
-    Telegram webhook endpoint.
-    
-    This endpoint:
-    - Receives Telegram webhook updates
-    - Processes messages through chat flow
-    - Sends responses back to Telegram
-    
-    No authentication required (Telegram webhook validation should be done via secret token in production).
-    """
     try:
         await telegram_service.process_webhook_update(update, task_repository)
         return {"ok": True}
@@ -79,11 +62,6 @@ async def telegram_webhook(
 
 @router.get("/webhook")
 async def telegram_webhook_info() -> dict:
-    """
-    Webhook info endpoint (for verification).
-    
-    Telegram may send GET requests to verify webhook endpoint.
-    """
     return {
         "status": "webhook_endpoint",
         "service": "TASKGENIUS Core API",
@@ -91,12 +69,10 @@ async def telegram_webhook_info() -> dict:
 
 
 def _get_user_repo(db: AsyncIOMotorDatabase) -> MongoUserRepository:
-    """Helper to get user repository instance."""
     return MongoUserRepository(db)
 
 
 def _get_verification_repo(db: AsyncIOMotorDatabase) -> MongoTelegramVerificationRepository:
-    """Helper to get verification repository instance."""
     return MongoTelegramVerificationRepository(db)
 
 
@@ -105,12 +81,6 @@ async def start_telegram_link(
     current_user: CurrentUser,
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)],
 ) -> TelegramLinkStartResponse:
-    """
-    Start Telegram linking flow for the authenticated user.
-    
-    Generates a short-lived verification code that the user must send
-    to the Telegram bot in order to link accounts.
-    """
     import secrets
     import string
     from datetime import datetime, timedelta, timezone
@@ -141,7 +111,6 @@ async def start_telegram_link(
 async def get_telegram_status(
     current_user: CurrentUser,
 ) -> TelegramStatusResponse:
-    """Return current Telegram linking status for the authenticated user."""
     if not current_user.telegram:
         return TelegramStatusResponse(
             linked=False,
@@ -161,7 +130,6 @@ async def unlink_telegram(
     current_user: CurrentUser,
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)],
 ) -> TelegramUnlinkResponse:
-    """Unlink Telegram account from the authenticated user."""
     user_repo = _get_user_repo(db)
     await user_repo.remove_telegram_link(current_user.id)
     return TelegramUnlinkResponse(unlinked=True)
@@ -173,11 +141,6 @@ async def toggle_telegram_notifications(
     current_user: CurrentUser,
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)],
 ) -> TelegramStatusResponse:
-    """
-    Enable or disable Telegram notifications for the authenticated user.
-    
-    Requires that the user has already linked their Telegram account.
-    """
     user_repo = _get_user_repo(db)
     
     # Check if user has Telegram link before trying to update
@@ -206,7 +169,6 @@ async def toggle_telegram_notifications(
 async def get_weekly_summary_service(
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
 ) -> TelegramWeeklySummaryService:
-    """Dependency to get TelegramWeeklySummaryService instance."""
     user_repo = MongoUserRepository(db)
     summary_repo = MongoTelegramWeeklySummaryRepository(db)
     task_repo = TaskRepository(db)
@@ -227,14 +189,6 @@ async def send_weekly_summary(
     current_user: CurrentUser,
     weekly_summary_service: Annotated[TelegramWeeklySummaryService, Depends(get_weekly_summary_service)],
 ) -> TelegramSummarySendResponse:
-    """
-    Send weekly summary to Telegram for the authenticated user (on-demand).
-    
-    This endpoint allows manual triggering of the weekly summary, bypassing
-    the scheduled job and idempotency checks. Useful for testing or immediate delivery.
-    
-    Requires that the user has already linked their Telegram account.
-    """
     if not current_user.telegram:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

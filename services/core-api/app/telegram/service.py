@@ -1,9 +1,3 @@
-"""
-TASKGENIUS Core API - Telegram Service
-
-Service for handling Telegram webhook events and user mapping.
-"""
-
 from typing import Optional
 import asyncio
 import re
@@ -22,15 +16,6 @@ from app.chat.schemas import ChatResponse
 
 
 class TelegramService:
-    """
-    Service for Telegram integration.
-    
-    Responsibilities:
-    - Process Telegram webhook updates
-    - Map Telegram user IDs to application user IDs
-    - Route messages through chat flow
-    - Send responses back to Telegram
-    """
 
     def __init__(
         self,
@@ -53,20 +38,7 @@ class TelegramService:
         update: TelegramUpdate,
         task_repository: TaskRepositoryInterface,
     ) -> None:
-        """
-        Process a Telegram webhook update.
-        
-        This method:
-        0. Checks idempotency (skip if already processed)
-        1. Extracts message from update
-        2. Handles verification codes OR maps Telegram user to application user
-        3. Routes message through chat flow
-        4. Sends response back to Telegram
-        
-        Args:
-            update: Telegram webhook update
-            task_repository: Task repository for chat flow
-        """
+
         # Idempotency check: skip if this update_id was already processed
         if self.update_repository:
             try:
@@ -128,7 +100,6 @@ class TelegramService:
         )
 
     def _looks_like_verification_code(self, text: str) -> bool:
-        """Check if message text looks like a verification code (6-8 alphanumeric chars)."""
         if not text:
             return False
         stripped = text.strip()
@@ -192,17 +163,6 @@ class TelegramService:
             )
 
     async def _get_or_create_user_mapping(self, telegram_user_id: int) -> Optional[str]:
-        """
-        Get mapping between Telegram user ID and application user ID.
-        
-        First tries MongoDB repository, falls back to in-memory mapping for backward compatibility.
-        
-        Args:
-            telegram_user_id: Telegram user ID
-        
-        Returns:
-            Application user ID if mapping exists, None otherwise
-        """
         # Try MongoDB repository first
         if self.user_repository:
             try:
@@ -217,16 +177,6 @@ class TelegramService:
         return self._user_mappings.get(telegram_user_id)
     
     def set_user_mapping(self, telegram_user_id: int, app_user_id: str) -> None:
-        """
-        Set mapping between Telegram user ID and application user ID.
-        
-        This is a helper method for testing. In production, use verification flow.
-        Also updates in-memory fallback for backward compatibility.
-        
-        Args:
-            telegram_user_id: Telegram user ID
-            app_user_id: Application user ID
-        """
         self._user_mappings[telegram_user_id] = app_user_id
         # Also try to persist to MongoDB if repository is available
         if self.user_repository:

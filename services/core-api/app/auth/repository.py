@@ -1,16 +1,8 @@
-"""
-TASKGENIUS Core API - User Repository
-
-MongoDB implementation for user persistence.
-"""
-
 from abc import ABC, abstractmethod
 from typing import Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
-
 from app.auth.models import User
-
 
 class UserRepositoryInterface(ABC):
     """Abstract interface for user repository.

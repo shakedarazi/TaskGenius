@@ -1,10 +1,3 @@
-"""
-TASKGENIUS Chatbot Service - Router
-
-Internal API endpoints for chatbot-service.
-Accessible only from core-api via internal HTTP.
-"""
-
 import logging
 from fastapi import APIRouter, HTTPException, status
 from app.schemas import ChatRequest, ChatResponse
