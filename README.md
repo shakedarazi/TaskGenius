@@ -1,169 +1,320 @@
-# TASKGENIUS
+# TaskGenius
 
-Task management platform with AI-powered insights and an integrated chatbot service.
+A task management platform with an AI-powered assistant that generates task suggestions without ever executing actions directly. The system enforces strict separation between AI inference and data mutation, ensuring that all changes to user data flow through controlled, validated API boundaries.
 
-## Architecture
+## Project Overview
+
+TaskGenius addresses a fundamental problem in AI-integrated applications: how to leverage language models for productivity while maintaining complete control over what actions are actually performed.
+
+Unlike typical "AI chatbot" implementations where the model can invoke tools, call APIs, or directly manipulate data, TaskGenius treats the AI as a **read-only suggestion engine**. The user describes what they need to accomplish, the AI generates structured task suggestions, and the user explicitly selects which suggestions to add. Every database write passes through the core API with full validation and authentication checks.
+
+This architecture eliminates an entire class of risks associated with autonomous AI agents, including prompt injection attacks that attempt to trick the model into performing unintended actions.
+
+## Key Features
+
+- **Suggestion-only AI**: The chatbot service generates task recommendations but cannot create, modify, or delete any data
+- **Single point of mutation**: All database writes occur exclusively through the core API after schema validation and authentication
+- **Microservice isolation**: The AI service has no database credentials and no network path to the database
+- **Structured AI output**: Model responses are parsed as strict JSON with fallback to deterministic templates on failure
+- **Multi-language support**: Full Hebrew and English support with language-aware responses
+- **Telegram integration**: Optional notifications and weekly AI-generated summaries
+- **Comprehensive test coverage**: Automated tests for both services run on every push via GitHub Actions
+
+## System Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                       Browser                                    │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                  React Client (:5173)                    │    │
-│  │                  packages/client                         │    │
-│  └─────────────────────────────┬───────────────────────────┘    │
-└────────────────────────────────┼────────────────────────────────┘
-                                 │ HTTP REST
-                                 ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Docker Network                                │
-│  ┌─────────────┐    ┌──────────────────┐    ┌────────────┐      │
-│  │  core-api   │───▶│ chatbot-service  │    │  mongodb   │      │
-│  │  (public)   │    │   (internal)     │    │ (internal) │      │
-│  │  :8000      │    │   :8001          │    │  :27017    │      │
-│  └──────┬──────┘    └──────────────────┘    └─────▲──────┘      │
-│         │                                          │             │
-│         └──────────────────────────────────────────┘             │
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│                              Client                                      │
+│                     React + TypeScript (Vite)                           │
+└─────────────────────────────────┬───────────────────────────────────────┘
+                                  │ HTTPS (authenticated)
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Docker Network                                   │
+│                                                                          │
+│   ┌─────────────────────┐         ┌─────────────────────┐               │
+│   │      core-api       │────────▶│   chatbot-service   │               │
+│   │   (public :8000)    │         │   (internal :8001)  │               │
+│   │                     │         │                     │               │
+│   │  - Authentication   │         │  - Suggestion gen   │               │
+│   │  - Authorization    │         │  - OpenAI calls     │               │
+│   │  - All DB writes    │         │  - NO DB access     │               │
+│   │  - Request valid.   │         │  - Stateless        │               │
+│   └──────────┬──────────┘         └─────────────────────┘               │
+│              │                                                           │
+│              │ MongoDB protocol (internal only)                          │
+│              ▼                                                           │
+│   ┌─────────────────────┐                                               │
+│   │      MongoDB        │                                               │
+│   │  (internal :27017)  │                                               │
+│   │   NO external port  │                                               │
+│   └─────────────────────┘                                               │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+**Critical architectural invariants:**
+
+1. **The chatbot-service cannot access MongoDB.** It has no connection string, no credentials, and no network route to the database container.
+
+2. **The core-api is the single source of truth.** Every task creation, update, and deletion is validated and executed here.
+
+3. **External traffic reaches only the core-api.** The chatbot-service and MongoDB expose no ports to the host machine.
+
+## AI Design Philosophy
+
+### Always Suggestions, Never Actions
+
+The chatbot-service receives a user message and returns a structured response containing:
+- A two-sentence summary of what the user described
+- Up to five task suggestions with title, priority, and optional metadata
+
+It does not return commands. It does not indicate "ready to execute." It simply offers options.
+
+### User-Controlled Execution
+
+After receiving suggestions, the user explicitly selects which tasks to add. This selection triggers a standard task creation request to the core-api, completely bypassing the chatbot-service. The AI played its role (suggesting) and is no longer in the loop for the actual mutation.
+
+### Structured Output with Deterministic Fallback
+
+AI responses must conform to a strict JSON schema. If the model returns malformed output, the system falls back to deterministic, template-based suggestions rather than failing or passing through unparsed content.
+
+### Why This Matters
+
+Autonomous AI agents that can "take action" introduce risk surfaces that are difficult to fully secure:
+- Prompt injection can trick the model into calling unintended functions
+- Ambiguous user input can lead to destructive actions
+- Model hallucinations can result in invalid operations
+
+By making the AI purely advisory, these risks are structurally eliminated. Even if an attacker crafts a prompt that convinces the model to "output" a delete command, nothing happens—because the chatbot-service has no mechanism to execute commands.
+
+## Security and Trust Boundaries
+
+### Authentication and Authorization
+
+- **JWT-based authentication**: All core-api endpoints (except health checks) require a valid token
+- **Password hashing**: User credentials are hashed with bcrypt before storage
+- **Token expiration**: JWTs have configurable expiration with secure defaults
+- **Ownership enforcement**: Users can only access and modify their own tasks
+
+### Service Isolation
+
+The chatbot-service is architecturally incapable of modifying data:
+
+| Capability | core-api | chatbot-service |
+|------------|----------|-----------------|
+| Database connection | Yes | No |
+| Task CRUD operations | Yes | No |
+| User authentication | Yes | No |
+| External network access | Yes (outbound) | Yes (OpenAI only) |
+| Receives user requests | Yes | No (internal only) |
+
+Even if the chatbot-service were fully compromised, an attacker would gain access to a stateless container that can call OpenAI and respond to internal HTTP requests—nothing more.
+
+### Request Validation
+
+FastAPI with Pydantic provides automatic request validation:
+- **Schema enforcement**: Invalid payloads are rejected before reaching business logic
+- **Type coercion**: Strict typing prevents type confusion attacks
+- **Field constraints**: Minimum/maximum lengths, enum validation, and format checks are declarative
+
+### Protection Against Common Attack Vectors
+
+| Threat | Mitigation |
+|--------|------------|
+| Prompt injection | AI cannot execute actions; output is parsed as data, not commands |
+| Unauthorized data access | JWT authentication + ownership checks on every request |
+| SQL/NoSQL injection | Pydantic validation + MongoDB driver parameterization |
+| Privilege escalation | Chatbot-service has no privileges to escalate |
+| Malformed AI output | Strict JSON parsing with fallback to safe defaults |
+| CSRF | Token-based auth (no cookies for API calls) |
+
+### Security by Architecture
+
+The security model does not depend on prompt engineering or hoping the AI "behaves." The guarantees are structural:
+
+- The AI service physically cannot reach the database
+- The AI service has no credentials to any system
+- All mutations require authenticated requests to a separate service
+- The mutation service validates every field before writing
+
+## Backend and Infrastructure
+
+### core-api (FastAPI)
+
+Responsibilities:
+- User registration, login, and session management
+- Task CRUD with ownership enforcement
+- Weekly insights generation
+- Telegram bot integration
+- Orchestrating calls to chatbot-service
+- All MongoDB operations
+
+FastAPI was chosen for:
+- Native async support for I/O-bound workloads
+- Automatic OpenAPI documentation
+- Pydantic integration for request/response validation
+- Dependency injection for clean separation of concerns
+- High performance with minimal overhead
+
+### chatbot-service (FastAPI)
+
+Responsibilities:
+- Receiving messages from core-api (never from external clients)
+- Generating task suggestions via OpenAI
+- Returning structured JSON responses
+- Falling back to deterministic templates when AI fails
+
+The service is intentionally minimal (~150 lines of core logic). It maintains no state between requests.
+
+### Docker Configuration
+
+```yaml
+services:
+  core-api:
+    ports: ["8000:8000"]      # Only public-facing service
+    depends_on: [mongodb, chatbot-service]
+    
+  chatbot-service:
+    # NO PORTS EXPOSED - internal only
+    
+  mongodb:
+    # NO PORTS EXPOSED - internal only
+```
+
+Internal services communicate over a Docker bridge network. The host machine cannot directly reach the chatbot-service or MongoDB.
+
+## CI and Testing
+
+### GitHub Actions Pipeline
+
+Every push to `main` and every pull request triggers:
+
+1. **test-core-api**: Runs pytest against all core-api tests
+2. **test-chatbot-service**: Runs pytest against all chatbot-service tests
+3. **build-docker**: Builds both Docker images (runs only if tests pass)
+4. **validate-compose**: Validates docker-compose.yml syntax
+
+### What Is Tested
+
+- **Authentication flows**: Registration, login, token validation, expiration
+- **Task operations**: CRUD with ownership enforcement, field validation
+- **Chat integration**: Message handling, suggestion generation, fallback behavior
+- **Edge cases**: Empty inputs, invalid schemas, malformed AI responses
+- **Service boundaries**: Ensuring chatbot-service returns suggestions without side effects
+
+### Why Testing Matters Here
+
+AI-assisted features are notoriously difficult to test because model outputs vary. TaskGenius addresses this by:
+- Mocking OpenAI calls in tests to ensure deterministic behavior
+- Testing the fallback path independently
+- Validating that AI output parsing correctly handles malformed responses
+- Ensuring the suggestion-to-task flow works regardless of AI involvement
+
+## Getting Started
 
 ### Prerequisites
-- Docker & Docker Compose
-- Node.js 20+ (for client development)
-- Python 3.11+ (for backend development)
 
-### Run Everything (Dev Mode)
+- Docker and Docker Compose
+- Node.js 20+ (for local client development)
+- Python 3.11+ (for local backend development)
+
+### Quick Start with Docker
 
 ```bash
-# 1. Start MongoDB
-docker compose up -d mongodb
+# Clone the repository
+git clone https://github.com/your-username/TaskGenius.git
+cd TaskGenius
 
-# 2. Install root dependencies
+# Start all services
+docker compose up --build
+
+# Verify health
+curl http://localhost:8000/health
+```
+
+The React client must be built separately or run in development mode:
+
+```bash
+cd packages/client
 npm install
-
-# 3. Install client dependencies
-npm run install:client
-
-# 4. Start backend + frontend concurrently
 npm run dev
 ```
 
-This starts:
-- **core-api**: http://localhost:8000
-- **React Client**: http://localhost:5173
+Access the application at `http://localhost:5173`.
 
-### Alternative: Run with Full Docker
+### Environment Variables
+
+Create a `.env` file in the project root for optional features:
 
 ```bash
-# Build and start all services
-docker compose up --build
+# OpenAI integration (optional - falls back to templates if not set)
+USE_LLM=true
+OPENAI_API_KEY=sk-...
 
-# Health check
-curl http://localhost:8000/health
+# Telegram integration (optional)
+TELEGRAM_BOT_TOKEN=your-bot-token
 ```
 
 ## Project Structure
 
 ```
 TaskGenius/
-├── package.json            # Root workspace scripts
-├── docker-compose.yml      # Container orchestration
-├── docs/                   # Documentation
-├── shared/contracts/       # Shared schemas and enums
+├── .github/workflows/ci.yml    # GitHub Actions pipeline
+├── docker-compose.yml          # Container orchestration
 ├── packages/
-│   └── client/             # React + TypeScript + Vite
+│   └── client/                 # React + TypeScript frontend
 │       ├── src/
-│       │   ├── api/        # Typed HTTP client
-│       │   ├── types/      # Shared DTOs
-│       │   ├── pages/      # Route-level views
-│       │   ├── components/ # Reusable UI
-│       │   └── routes/     # Routing config
+│       │   ├── api/            # Typed HTTP client
+│       │   ├── components/     # UI components
+│       │   ├── pages/          # Route views
+│       │   └── types/          # Shared type definitions
 │       └── ...
 └── services/
-    ├── core-api/           # Primary backend (public)
-    └── chatbot-service/    # Conversational layer (internal)
+    ├── core-api/               # Primary backend (public)
+    │   ├── app/
+    │   │   ├── auth/           # Authentication module
+    │   │   ├── tasks/          # Task management
+    │   │   ├── chat/           # Chat orchestration
+    │   │   ├── insights/       # Weekly summaries
+    │   │   └── telegram/       # Bot integration
+    │   └── tests/
+    └── chatbot-service/        # AI suggestion service (internal)
+        ├── app/
+        │   ├── service.py      # Core suggestion logic
+        │   ├── schemas.py      # Request/response models
+        │   └── router.py       # HTTP endpoints
+        └── tests/
 ```
 
-## Environment Variables
+## Why This Architecture
 
-### Client (`packages/client/.env`)
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VITE_CORE_API_BASE_URL` | `http://localhost:8000` | Core API URL |
+### The Problem with Autonomous AI
 
-### Core API
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CORS_ORIGINS` | `http://localhost:5173,http://localhost:3000` | Allowed client origins |
-| `MONGODB_URI` | `mongodb://mongodb:27017` | MongoDB connection |
-| `CHATBOT_SERVICE_URL` | `http://chatbot-service:8001` | Internal chatbot URL |
+Many AI-integrated applications give the model direct access to tools, databases, or APIs. This creates a trust problem: you must trust that the model will never be tricked into misusing its capabilities.
 
-## Development Commands
+Prompt injection research has shown this trust is misplaced. Models can be manipulated through carefully crafted inputs, and the attack surface grows with every capability you grant.
 
-```bash
-# Root level
-npm run dev              # Start backend + client
-npm run dev:backend      # Start core-api only
-npm run dev:client       # Start React client only
-npm run test:backend     # Run backend tests
-npm run test:client      # Run client tests
+### The TaskGenius Approach
 
-# Client level (from packages/client)
-npm run dev              # Start Vite dev server
-npm run build            # Production build
-npm run lint             # Run ESLint
-npm run test             # Run Vitest
-```
+Instead of trying to make AI "safe enough" to trust with actions, TaskGenius removes the need for trust entirely:
 
-## Architecture Principles
+- The AI cannot take actions because it has no mechanism to do so
+- Suggestions are data, not commands
+- The human remains in the loop for every mutation
 
-1. **Client → core-api only**: React client communicates exclusively with core-api
-2. **chatbot-service is advisory**: Provides intent/entity extraction, never executes mutations
-3. **core-api is system of record**: All data mutations happen here after validation
-4. **Internal services isolated**: MongoDB and chatbot-service have no public exposure
+This trades some convenience (no "just do it" commands) for complete control over what actually happens to user data.
 
-## Documentation
+### Trade-offs
 
-- [Requirements](docs/requirements.en.md)
-- [Architecture](docs/architecture.md)
-- [Roadmap](docs/roadmap.md)
-- [Chatbot SOP](docs/chatbot_sop.md)
-- [Weekly Insights Spec](docs/insights_weekly_summary_spec.md)
-- [Sequence Flows](docs/sequence_flows.md)
+| Aspect | Traditional AI Agent | TaskGenius |
+|--------|---------------------|------------|
+| User effort | Lower (AI acts autonomously) | Higher (user confirms actions) |
+| Risk surface | Large (every capability is attackable) | Minimal (AI has no capabilities) |
+| Predictability | Variable (model-dependent) | High (deterministic execution path) |
+| Debugging | Difficult (why did AI do X?) | Straightforward (user chose X) |
+
+For a task management application where incorrect actions could delete important data or create confusion, the TaskGenius model prioritizes safety and predictability over automation.
 
 ## License
 
 
-## run it 
-
-Step-by-Step Instructions
-1. Install Root Dependencies
-cd c:\Users\shaked arazi\Desktop\Projects\TaskGenius
-npm install
-
-2. Install Client Dependencies
-cd packages/client
-npm install
-
-3. Set Up Python Virtual Environment (for Backend)
-cd services/core-api
-python -m venv venv
-Activate it:
-
-Platform	Command
-Windows (PowerShell)	.\venv\Scripts\Activate.ps1
-Windows (CMD)	venv\Scripts\activate.bat
-
-4. Install Python Dependencies (core-api directory)
-
-pip install -r requirements.txt
-
-5. Run the Application
-Option A: Run Everything Together (from root)
-npm run dev
-This starts:
-
-Backend (FastAPI) on http://localhost:8000
-Frontend (Vite/React) on http://localhost:5173
-MIT

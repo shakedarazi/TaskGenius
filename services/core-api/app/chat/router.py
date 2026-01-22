@@ -1,5 +1,4 @@
 from typing import Annotated
-
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth.dependencies import CurrentUser

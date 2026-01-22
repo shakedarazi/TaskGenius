@@ -263,7 +263,7 @@ export function SettingsPage() {
                                                         <strong><i className="bi bi-info-circle me-2"></i>Instructions:</strong>
                                                         <ol className="mb-0 mt-2">
                                                             <li>Open your Telegram app</li>
-                                                            <li>Search for <strong>@TASKGENIUS</strong> bot</li>
+                                                            <li>Search for <strong>@Taskgeniuss_bot</strong> in telegram</li>
                                                             <li>Start a conversation with the bot</li>
                                                             <li>Send the code above as a message</li>
                                                         </ol>
