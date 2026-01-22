@@ -71,6 +71,7 @@ async def process_message(
     message: Optional[str],
     selection: Optional[int],
     task_repository: TaskRepositoryInterface,
+    deadline: Optional[str] = None,
 ) -> ChatResponse:
     """Process chat request - either generate suggestions or add selected task."""
     is_hebrew = message and any('\u0590' <= c <= '\u05FF' for c in message)
@@ -90,7 +91,7 @@ async def process_message(
         
         # Add task from selection
         suggestion = cached[selection - 1]
-        task = await add_task_from_suggestion(user_id, suggestion, task_repository)
+        task = await add_task_from_suggestion(user_id, suggestion, task_repository, deadline)
         clear_cached_suggestions(user_id)
         
         return ChatResponse(
@@ -134,14 +135,25 @@ async def process_message(
 async def add_task_from_suggestion(
     user_id: str,
     suggestion: Dict[str, Any],
-    task_repository: TaskRepositoryInterface
+    task_repository: TaskRepositoryInterface,
+    deadline: Optional[str] = None,
 ) -> Task:
     """Create task from suggestion."""
+    from datetime import datetime
+    
     priority_map = {"low": TaskPriority.LOW, "medium": TaskPriority.MEDIUM, "high": TaskPriority.HIGH, "urgent": TaskPriority.URGENT}
     category_map = {"work": TaskCategory.WORK, "study": TaskCategory.STUDY, "personal": TaskCategory.PERSONAL,
                     "health": TaskCategory.HEALTH, "finance": TaskCategory.FINANCE, "errands": TaskCategory.ERRANDS, "other": TaskCategory.OTHER}
     estimate_map = {"lt_15": EstimateBucket.LT_15, "15_30": EstimateBucket._15_30, "30_60": EstimateBucket._30_60,
                     "60_120": EstimateBucket._60_120, "gt_120": EstimateBucket.GT_120}
+    
+    # Parse deadline if provided
+    parsed_deadline = None
+    if deadline:
+        try:
+            parsed_deadline = datetime.fromisoformat(deadline.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            pass  # Invalid deadline format, omit it
     
     task = Task.create(
         owner_id=user_id,
@@ -150,6 +162,7 @@ async def add_task_from_suggestion(
         priority=priority_map.get(suggestion.get("priority", "medium"), TaskPriority.MEDIUM),
         category=category_map.get(suggestion.get("category")) if suggestion.get("category") else None,
         estimate_bucket=estimate_map.get(suggestion.get("estimate_bucket")) if suggestion.get("estimate_bucket") else None,
+        deadline=parsed_deadline,
     )
     
     return await task_repository.create(task)

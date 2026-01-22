@@ -19,6 +19,9 @@ export function ChatWidget() {
     const [suggestions, setSuggestions] = useState<TaskSuggestion[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
+    // Multi-selection state
+    const [selected, setSelected] = useState<Set<number>>(new Set());
+    const [deadlines, setDeadlines] = useState<Record<number, string>>({});
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
@@ -32,10 +35,34 @@ export function ChatWidget() {
         if (isOpen) inputRef.current?.focus();
     }, [isOpen]);
 
+    // Clear selection when suggestions change
+    useEffect(() => {
+        setSelected(new Set());
+        setDeadlines({});
+    }, [suggestions]);
+
+    // Toggle selection
+    const toggleSelect = (index: number) => {
+        setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(index)) {
+                next.delete(index);
+            } else {
+                next.add(index);
+            }
+            return next;
+        });
+    };
+
+    // Set deadline for a suggestion
+    const setDeadline = (index: number, value: string) => {
+        setDeadlines(prev => ({ ...prev, [index]: value }));
+    };
+
     // Format suggestion for display
-    const formatSuggestion = (s: TaskSuggestion, index: number): string => {
+    const formatSuggestion = (s: TaskSuggestion): string => {
         const priority = s.priority === 'high' || s.priority === 'urgent' ? ' ⚡' : '';
-        return `${index + 1}. ${s.title}${priority}`;
+        return `${s.title}${priority}`;
     };
 
     // Handle message submit
@@ -43,13 +70,6 @@ export function ChatWidget() {
         e.preventDefault();
         const text = input.trim();
         if (!text || loading) return;
-
-        // Check if input is a number (selection)
-        const num = parseInt(text, 10);
-        if (!isNaN(num) && num >= 1 && num <= suggestions.length) {
-            await handleSelection(num);
-            return;
-        }
 
         // Regular message
         const userMsg: Message = {
@@ -87,34 +107,45 @@ export function ChatWidget() {
         }
     };
 
-    // Handle suggestion selection (click or number input)
-    const handleSelection = async (num: number) => {
-        setInput('');
+    // Handle adding selected suggestions
+    const handleAddSelected = async () => {
+        if (selected.size === 0 || loading) return;
         setLoading(true);
 
+        const indices = Array.from(selected).sort((a, b) => a - b);
+        const added: string[] = [];
+        
         try {
-            const response = await chatApi.selectSuggestion(num);
-            
+            for (const index of indices) {
+                const deadline = deadlines[index] || undefined;
+                const response = await chatApi.selectSuggestion(index + 1, deadline);
+                if (response.added_task) {
+                    added.push(response.added_task.title);
+                }
+            }
+
             // Clear suggestions after successful add
             setSuggestions([]);
             
             const msg: Message = {
                 id: `a-${Date.now()}`,
                 role: 'assistant',
-                content: response.reply,
+                content: added.length > 0 
+                    ? `✅ Added ${added.length} task${added.length > 1 ? 's' : ''}: ${added.join(', ')}`
+                    : 'No tasks were added.',
                 timestamp: new Date(),
             };
             setMessages(prev => [...prev, msg]);
 
-            // Notify app that a task was created
-            if (response.added_task) {
+            // Notify app that tasks were created
+            if (added.length > 0) {
                 window.dispatchEvent(new CustomEvent('taskMutated', { detail: { intent: 'add_task' } }));
             }
         } catch {
             setMessages(prev => [...prev, {
                 id: `e-${Date.now()}`,
                 role: 'assistant',
-                content: 'Failed to add task. Please try again.',
+                content: 'Failed to add tasks. Please try again.',
                 timestamp: new Date(),
             }]);
         } finally {
@@ -140,7 +171,7 @@ export function ChatWidget() {
                     <div className="chat-header">
                         <div>
                             <h3>TaskGenius Assistant</h3>
-                            <p>Tell me what you need to do</p>
+                            <p>Tell me about your assignments or projects</p>
                         </div>
                         {messages.length > 0 && (
                             <button
@@ -156,13 +187,13 @@ export function ChatWidget() {
                     <div className="chat-messages">
                         {messages.length === 0 && suggestions.length === 0 && (
                             <div className="chat-empty">
-                                <div className="chat-empty-icon">💬</div>
+                                <div className="chat-empty-icon">📚</div>
                                 <p>Start a conversation!</p>
                                 <div className="chat-examples">
                                     <p>Try:</p>
                                     <ul>
-                                        <li>"I need to prepare for tomorrow's meeting"</li>
-                                        <li>"Help me organize my work tasks"</li>
+                                        <li>"I need to prepare for my final exam"</li>
+                                        <li>"Help me organize my course assignments"</li>
                                     </ul>
                                 </div>
                             </div>
@@ -178,27 +209,44 @@ export function ChatWidget() {
                             </div>
                         ))}
 
-                        {/* Suggestions displayed separately */}
+                        {/* Suggestions with multi-select and deadline */}
                         {suggestions.length > 0 && (
                             <div className="chat-suggestions">
-                                <div className="suggestions-header">Click to add or type a number:</div>
+                                <div className="suggestions-header">Select tasks to add:</div>
                                 <ul className="suggestions-list">
                                     {suggestions.map((s, i) => (
-                                        <li key={i}>
-                                            <button
-                                                className="suggestion-item"
-                                                onClick={() => handleSelection(i + 1)}
+                                        <li key={i} className="suggestion-row">
+                                            <label className="suggestion-checkbox">
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selected.has(i)}
+                                                    onChange={() => toggleSelect(i)}
+                                                    disabled={loading}
+                                                />
+                                                <span className="suggestion-label">{i + 1}. {formatSuggestion(s)}</span>
+                                            </label>
+                                            <input
+                                                type="date"
+                                                className="suggestion-date"
+                                                value={deadlines[i] || ''}
+                                                onChange={e => setDeadline(i, e.target.value)}
                                                 disabled={loading}
-                                            >
-                                                {formatSuggestion(s, i)}
-                                            </button>
+                                                title="Set deadline (optional)"
+                                            />
                                         </li>
                                     ))}
                                 </ul>
+                                <button
+                                    className="add-selected-btn"
+                                    onClick={handleAddSelected}
+                                    disabled={loading || selected.size === 0}
+                                >
+                                    {loading ? '⏳ Adding...' : `Add ${selected.size} selected`}
+                                </button>
                             </div>
                         )}
 
-                        {loading && (
+                        {loading && suggestions.length === 0 && (
                             <div className="chat-message assistant loading">
                                 <div className="message-avatar">🤖</div>
                                 <div className="message-bubble">
@@ -217,7 +265,7 @@ export function ChatWidget() {
                             type="text"
                             value={input}
                             onChange={e => setInput(e.target.value)}
-                            placeholder={suggestions.length > 0 ? "Type 1-" + suggestions.length + " to add..." : "Type a message..."}
+                            placeholder="Describe what you need to do..."
                             disabled={loading}
                         />
                         <button type="submit" disabled={loading || !input.trim()}>

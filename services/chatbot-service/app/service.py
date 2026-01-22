@@ -27,14 +27,14 @@ def build_prompt(message: str, tasks: Optional[List[Dict[str, Any]]]) -> str:
         titles = [t.get("title", "") for t in tasks[:10]]
         tasks_context = f"\nEXISTING TASKS (avoid duplicates): {', '.join(titles)}"
     
-    return f"""You are a task suggestion assistant.
+    return f"""You are a task suggestion assistant for university/college students.
 
 USER MESSAGE: "{message}"
 {tasks_context}
 
 Generate a JSON response with:
-- "summary": 2 short sentences summarizing what the user said (SAME LANGUAGE as user)
-- "suggestions": array of 5-8 task objects
+- "summary": EXACTLY 2 sentences describing the main themes/types of tasks implied and a rough sense of overall effort (short/medium/long). Do NOT list tasks. Do NOT mention priority.
+- "suggestions": array of up to 5 task objects
 
 Each task MUST have:
 - "title": string (clear, actionable, SAME LANGUAGE as user)
@@ -46,6 +46,8 @@ Each task MAY have:
 
 RULES:
 - Match user's language exactly (Hebrew → Hebrew, English → English)
+- Use academic context: courses, assignments, exams, labs, projects, professors, lectures, seminars
+- Avoid school/high-school/matriculation terminology
 - Infer priority from urgency words
 - Be specific and actionable
 - No markdown, ONLY valid JSON"""
@@ -70,24 +72,24 @@ def fallback_response(message: str) -> SuggestResponse:
     
     if is_hebrew:
         return SuggestResponse(
-            summary="קיבלתי את ההודעה שלך. הנה כמה הצעות למשימות.",
+            summary="נראה שיש לך כמה משימות אקדמיות לטפל בהן. ההיקף נראה בינוני.",
             suggestions=[
-                TaskSuggestion(title="לתכנן את המשימה הראשית", priority="high", category="work"),
-                TaskSuggestion(title="לפרק למשימות קטנות", priority="medium", category="work"),
-                TaskSuggestion(title="להגדיר תאריך יעד", priority="medium", category="personal"),
-                TaskSuggestion(title="לסדר סדרי עדיפויות", priority="low", category="personal"),
-                TaskSuggestion(title="לבדוק משימות קיימות", priority="low", category="other"),
+                TaskSuggestion(title="לסקור את חומר ההרצאה", priority="high", category="study"),
+                TaskSuggestion(title="להתחיל לעבוד על המטלה", priority="high", category="study"),
+                TaskSuggestion(title="לקבוע זמן ללמידה", priority="medium", category="study"),
+                TaskSuggestion(title="לארגן את החומרים לקורס", priority="medium", category="study"),
+                TaskSuggestion(title="לבדוק תאריכי הגשה", priority="low", category="study"),
             ]
         )
     
     return SuggestResponse(
-        summary="I received your message. Here are some task suggestions.",
+        summary="Looks like you have some academic tasks to handle. The overall effort seems moderate.",
         suggestions=[
-            TaskSuggestion(title="Plan the main task", priority="high", category="work"),
-            TaskSuggestion(title="Break into smaller tasks", priority="medium", category="work"),
-            TaskSuggestion(title="Set a deadline", priority="medium", category="personal"),
-            TaskSuggestion(title="Prioritize tasks", priority="low", category="personal"),
-            TaskSuggestion(title="Review existing tasks", priority="low", category="other"),
+            TaskSuggestion(title="Review lecture materials", priority="high", category="study"),
+            TaskSuggestion(title="Start working on assignment", priority="high", category="study"),
+            TaskSuggestion(title="Schedule study time", priority="medium", category="study"),
+            TaskSuggestion(title="Organize course materials", priority="medium", category="study"),
+            TaskSuggestion(title="Check submission deadlines", priority="low", category="study"),
         ]
     )
 
@@ -123,9 +125,9 @@ async def generate_suggestions(
             logger.warning("Invalid AI response format")
             return fallback_response(message)
         
-        # Validate and build response
+        # Validate and build response (max 5 suggestions)
         suggestions = []
-        for s in data.get("suggestions", [])[:8]:
+        for s in data.get("suggestions", [])[:5]:
             if not s.get("title"):
                 continue
             suggestions.append(TaskSuggestion(

@@ -25,5 +25,6 @@ async def chat(
         user_id=current_user.id,
         message=request.message,
         selection=request.selection,
+        deadline=request.deadline,
         task_repository=task_repository,
     )

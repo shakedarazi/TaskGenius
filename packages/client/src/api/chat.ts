@@ -17,7 +17,13 @@ export async function sendMessage(message: string): Promise<ChatResponse> {
 
 /**
  * Add a task by selecting a suggestion number
+ * @param selection - 1-based index of suggestion
+ * @param deadline - Optional ISO date string (YYYY-MM-DD)
  */
-export async function selectSuggestion(selection: number): Promise<ChatResponse> {
-    return apiClient.post<ChatResponse>('/chat', { selection });
+export async function selectSuggestion(selection: number, deadline?: string): Promise<ChatResponse> {
+    const payload: { selection: number; deadline?: string } = { selection };
+    if (deadline) {
+        payload.deadline = deadline;
+    }
+    return apiClient.post<ChatResponse>('/chat', payload);
 }
