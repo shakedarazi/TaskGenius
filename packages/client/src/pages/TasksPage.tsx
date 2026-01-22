@@ -412,7 +412,7 @@ export function TasksPage() {
         onDelete={handleTaskDeleted}
       />
 
-      {!isCompletedView && <ChatWidget onTaskCreated={handleTaskCreated} />}
+      {!isCompletedView && <ChatWidget />}
     </div>
   );
 }

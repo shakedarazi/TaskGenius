@@ -1,202 +1,129 @@
 /**
- * ChatWidget
-
+ * ChatWidget - Minimal suggestion-based chat UI
  */
 
 import { useState, useRef, useEffect, type FormEvent } from 'react';
 import { chatApi } from '@/api';
-import type { Task } from '@/types';
+import type { TaskSuggestion } from '@/types';
 
-interface ChatMessage {
+interface Message {
     id: string;
     role: 'user' | 'assistant';
     content: string;
     timestamp: Date;
-    intent?: string;
-    suggestions?: string[];
 }
 
-interface ChatWidgetProps {
-    onTaskCreated?: (task: Task) => void;
-}
-
-const CHAT_HISTORY_KEY = 'taskgenius_chat_history';
-const CHAT_HISTORY_EXPIRY_DAYS = 7; // Keep history for 7 days
-
-interface StoredChatMessage {
-    id: string;
-    role: 'user' | 'assistant';
-    content: string;
-    timestamp: string; // ISO string for storage
-    intent?: string;
-    suggestions?: string[];
-}
-
-interface StoredChatHistory {
-    messages: StoredChatMessage[];
-    timestamp: number;
-}
-
-export function ChatWidget({ onTaskCreated: _onTaskCreated }: ChatWidgetProps) {
+export function ChatWidget() {
     const [isOpen, setIsOpen] = useState(false);
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [suggestions, setSuggestions] = useState<TaskSuggestion[]>([]);
     const [input, setInput] = useState('');
     const [loading, setLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
 
-    // Load chat history from localStorage on mount
+    // Scroll to bottom when messages change
     useEffect(() => {
-        const loadHistory = () => {
-            try {
-                const stored = localStorage.getItem(CHAT_HISTORY_KEY);
-                if (stored) {
-                    const history: StoredChatHistory = JSON.parse(stored);
-                    const now = Date.now();
-                    const expiryTime = CHAT_HISTORY_EXPIRY_DAYS * 24 * 60 * 60 * 1000;
-                    
-                    // Check if history is still valid (not expired)
-                    if (now - history.timestamp < expiryTime) {
-                        // Convert timestamp strings back to Date objects
-                        const loadedMessages = history.messages.map(msg => ({
-                            ...msg,
-                            timestamp: new Date(msg.timestamp)
-                        }));
-                        setMessages(loadedMessages);
-                    } else {
-                        // History expired, clear it
-                        localStorage.removeItem(CHAT_HISTORY_KEY);
-                    }
-                }
-            } catch (err) {
-                console.error('Failed to load chat history:', err);
-                localStorage.removeItem(CHAT_HISTORY_KEY);
-            }
-        };
-        
-        loadHistory();
-    }, []);
-
-    // Save chat history to localStorage whenever messages change
-    useEffect(() => {
-        if (messages.length > 0) {
-            try {
-                const history: StoredChatHistory = {
-                    messages: messages.map(msg => ({
-                        ...msg,
-                        timestamp: msg.timestamp.toISOString() // Convert Date to string for storage
-                    })),
-                    timestamp: Date.now()
-                };
-                localStorage.setItem(CHAT_HISTORY_KEY, JSON.stringify(history));
-            } catch (err) {
-                console.error('Failed to save chat history:', err);
-            }
-        }
-    }, [messages]);
-
-
-    // Scroll to bottom when new messages arrive
-    useEffect(() => {
-        if (isOpen) {
-            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-        }
+        if (isOpen) messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [messages, isOpen]);
 
     // Focus input when chat opens
     useEffect(() => {
-        if (isOpen && inputRef.current) {
-            inputRef.current.focus();
-        }
+        if (isOpen) inputRef.current?.focus();
     }, [isOpen]);
 
+    // Format suggestion for display
+    const formatSuggestion = (s: TaskSuggestion, index: number): string => {
+        const priority = s.priority === 'high' || s.priority === 'urgent' ? ' ⚡' : '';
+        return `${index + 1}. ${s.title}${priority}`;
+    };
+
+    // Handle message submit
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault();
-        if (!input.trim() || loading) return;
+        const text = input.trim();
+        if (!text || loading) return;
 
-        const userMessage: ChatMessage = {
-            id: `user-${Date.now()}`,
+        // Check if input is a number (selection)
+        const num = parseInt(text, 10);
+        if (!isNaN(num) && num >= 1 && num <= suggestions.length) {
+            await handleSelection(num);
+            return;
+        }
+
+        // Regular message
+        const userMsg: Message = {
+            id: `u-${Date.now()}`,
             role: 'user',
-            content: input.trim(),
+            content: text,
             timestamp: new Date(),
         };
+        setMessages(prev => [...prev, userMsg]);
+        setInput('');
+        setSuggestions([]);
+        setLoading(true);
 
-        setMessages((prev) => [...prev, userMessage]);
-        const currentInput = input.trim();
+        try {
+            const response = await chatApi.sendMessage(text);
+            
+            const assistantMsg: Message = {
+                id: `a-${Date.now()}`,
+                role: 'assistant',
+                content: response.reply,
+                timestamp: new Date(),
+            };
+            setMessages(prev => [...prev, assistantMsg]);
+            setSuggestions(response.suggestions || []);
+        } catch {
+            setMessages(prev => [...prev, {
+                id: `e-${Date.now()}`,
+                role: 'assistant',
+                content: 'Sorry, something went wrong. Please try again.',
+                timestamp: new Date(),
+            }]);
+        } finally {
+            setLoading(false);
+            setTimeout(() => inputRef.current?.focus(), 50);
+        }
+    };
+
+    // Handle suggestion selection (click or number input)
+    const handleSelection = async (num: number) => {
         setInput('');
         setLoading(true);
 
         try {
-            // Prepare conversation history (last 10 messages, excluding current)
-            // Format: [{role: 'user'|'assistant', content: '...'}]
-            const historyForApi = [...messages, userMessage].slice(-10).map(msg => ({
-                role: msg.role,
-                content: msg.content
-            }));
+            const response = await chatApi.selectSuggestion(num);
             
-            const response = await chatApi.sendMessage({ 
-                message: currentInput,
-                conversation_history: historyForApi
-            });
+            // Clear suggestions after successful add
+            setSuggestions([]);
             
-            const assistantMessage: ChatMessage = {
-                id: `assistant-${Date.now()}`,
+            const msg: Message = {
+                id: `a-${Date.now()}`,
                 role: 'assistant',
                 content: response.reply,
                 timestamp: new Date(),
-                intent: response.intent,
-                suggestions: response.suggestions,
             };
+            setMessages(prev => [...prev, msg]);
 
-            setMessages((prev) => [...prev, assistantMessage].slice(-50));
-            
-            // Trigger refresh ONLY when a mutation was actually executed.
-            // Clear history on "cancelled" as well, but do NOT dispatch taskMutated on cancel.
-            const cmd = response.command;
-            const mutationIntents = new Set(['add_task', 'update_task', 'delete_task']);
-            const cancelIntents = new Set(['update_task_cancelled', 'delete_task_cancelled', 'create_task_cancelled']);
-
-            const cmdIntent = cmd?.intent;
-            const didMutate = Boolean(cmd && cmd.ready && cmdIntent && mutationIntents.has(cmdIntent));
-            const didCancel = Boolean(cmdIntent && cancelIntents.has(cmdIntent));
-
-            if (didMutate) {
-                setMessages([]);
-                localStorage.removeItem(CHAT_HISTORY_KEY);
-            
-                window.dispatchEvent(new CustomEvent('taskMutated', { detail: { intent: cmdIntent } }));
-                return;
+            // Notify app that a task was created
+            if (response.added_task) {
+                window.dispatchEvent(new CustomEvent('taskMutated', { detail: { intent: 'add_task' } }));
             }
-
-            if (didCancel) {
-                setMessages([]);
-                localStorage.removeItem(CHAT_HISTORY_KEY);
-                return;
-            }
-
-
-        } catch (err) {
-            const errorMessage: ChatMessage = {
-                id: `error-${Date.now()}`,
+        } catch {
+            setMessages(prev => [...prev, {
+                id: `e-${Date.now()}`,
                 role: 'assistant',
-                content: 'Sorry, something went wrong. Please try again.',
+                content: 'Failed to add task. Please try again.',
                 timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, errorMessage]);
+            }]);
         } finally {
             setLoading(false);
-            // Refocus input after response
-            setTimeout(() => inputRef.current?.focus(), 100);
+            setTimeout(() => inputRef.current?.focus(), 50);
         }
     };
 
-    const formatTime = (date: Date): string => {
-        return date.toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit',
-            hour12: false 
-        });
-    };
+    const formatTime = (d: Date) => d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
 
     return (
         <div className={`chat-widget ${isOpen ? 'open' : ''}`}>
@@ -204,12 +131,8 @@ export function ChatWidget({ onTaskCreated: _onTaskCreated }: ChatWidgetProps) {
                 className="chat-toggle"
                 onClick={() => setIsOpen(!isOpen)}
                 aria-label={isOpen ? 'Close chat' : 'Open chat'}
-                title={isOpen ? 'Close chat' : 'Open chat'}
             >
                 {isOpen ? '×' : '💬'}
-                {!isOpen && messages.length > 0 && (
-                    <span className="chat-badge">{messages.length}</span>
-                )}
             </button>
 
             {isOpen && (
@@ -217,16 +140,13 @@ export function ChatWidget({ onTaskCreated: _onTaskCreated }: ChatWidgetProps) {
                     <div className="chat-header">
                         <div>
                             <h3>TaskGenius Assistant</h3>
-                            <p>Ask me about your tasks, create new ones, or get insights</p>
+                            <p>Tell me what you need to do</p>
                         </div>
                         {messages.length > 0 && (
                             <button
                                 className="chat-clear"
-                                onClick={() => {
-                                    setMessages([]);
-                                    localStorage.removeItem(CHAT_HISTORY_KEY);
-                                }}
-                                title="Clear conversation"
+                                onClick={() => { setMessages([]); setSuggestions([]); }}
+                                title="Clear"
                             >
                                 Clear
                             </button>
@@ -234,53 +154,56 @@ export function ChatWidget({ onTaskCreated: _onTaskCreated }: ChatWidgetProps) {
                     </div>
 
                     <div className="chat-messages">
-                        {messages.length === 0 && (
+                        {messages.length === 0 && suggestions.length === 0 && (
                             <div className="chat-empty">
                                 <div className="chat-empty-icon">💬</div>
                                 <p>Start a conversation!</p>
                                 <div className="chat-examples">
-                                    <p>Try asking:</p>
+                                    <p>Try:</p>
                                     <ul>
-                                        <li>"What are my tasks?"</li>
-                                        <li>"Show me my weekly summary"</li>
-                                        <li>"What's urgent for me?"</li>
-                                        <li>"Add a task to review the project proposal"</li>
+                                        <li>"I need to prepare for tomorrow's meeting"</li>
+                                        <li>"Help me organize my work tasks"</li>
                                     </ul>
                                 </div>
                             </div>
                         )}
-                        {messages.map((msg) => (
+
+                        {messages.map(msg => (
                             <div key={msg.id} className={`chat-message ${msg.role}`}>
-                                <div className="message-avatar">
-                                    {msg.role === 'user' ? '👤' : '🤖'}
-                                </div>
+                                <div className="message-avatar">{msg.role === 'user' ? '👤' : '🤖'}</div>
                                 <div className="message-bubble">
                                     <div className="message-content">{msg.content}</div>
-                                    {msg.suggestions && msg.suggestions.length > 0 && (
-                                        <div className="message-suggestions">
-                                            {msg.suggestions.map((suggestion, i) => (
-                                                <button
-                                                    key={i}
-                                                    className="suggestion-chip"
-                                                    onClick={() => setInput(suggestion)}
-                                                >
-                                                    {suggestion}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    )}
                                     <div className="message-time">{formatTime(msg.timestamp)}</div>
                                 </div>
                             </div>
                         ))}
+
+                        {/* Suggestions displayed separately */}
+                        {suggestions.length > 0 && (
+                            <div className="chat-suggestions">
+                                <div className="suggestions-header">Click to add or type a number:</div>
+                                <ul className="suggestions-list">
+                                    {suggestions.map((s, i) => (
+                                        <li key={i}>
+                                            <button
+                                                className="suggestion-item"
+                                                onClick={() => handleSelection(i + 1)}
+                                                disabled={loading}
+                                            >
+                                                {formatSuggestion(s, i)}
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
                         {loading && (
                             <div className="chat-message assistant loading">
                                 <div className="message-avatar">🤖</div>
                                 <div className="message-bubble">
                                     <div className="typing-indicator">
-                                        <span></span>
-                                        <span></span>
-                                        <span></span>
+                                        <span></span><span></span><span></span>
                                     </div>
                                 </div>
                             </div>
@@ -293,21 +216,11 @@ export function ChatWidget({ onTaskCreated: _onTaskCreated }: ChatWidgetProps) {
                             ref={inputRef}
                             type="text"
                             value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            placeholder="Type a message..."
+                            onChange={e => setInput(e.target.value)}
+                            placeholder={suggestions.length > 0 ? "Type 1-" + suggestions.length + " to add..." : "Type a message..."}
                             disabled={loading}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSubmit(e);
-                                }
-                            }}
                         />
-                        <button 
-                            type="submit" 
-                            disabled={loading || !input.trim()}
-                            title="Send message (Enter)"
-                        >
+                        <button type="submit" disabled={loading || !input.trim()}>
                             {loading ? '⏳' : '➤'}
                         </button>
                     </form>
