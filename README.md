@@ -4,7 +4,7 @@ A task management platform with an AI-powered assistant that generates task sugg
 
 ---
 
-## Project Overview
+## 📋 Project Overview
 
 TaskGenius addresses a fundamental problem in AI-integrated applications: how to leverage language models for productivity while maintaining complete control over what actions are actually performed.
 
@@ -14,21 +14,21 @@ This architecture eliminates an entire class of risks associated with autonomous
 
 ---
 
-## Key Features
+## ✨ Key Features
 
 | Feature | Description |
 |---------|-------------|
-| **Suggestion-only AI** | The chatbot service generates task recommendations but cannot create, modify, or delete any data |
-| **Single point of mutation** | All database writes occur exclusively through the core API after schema validation and authentication |
-| **Microservice isolation** | The AI service has no database credentials and no network path to the database |
-| **Structured AI output** | Model responses are parsed as strict JSON with fallback to deterministic templates on failure |
-| **Multi-language support** | Full Hebrew and English support with language-aware responses |
-| **Telegram integration** | Optional notifications and weekly AI-generated summaries |
-| **Comprehensive testing** | Automated tests for both services run on every push via GitHub Actions |
+| 🧠 **Suggestion-only AI** | The chatbot service generates task recommendations but cannot create, modify, or delete any data |
+| 🧱 **Single point of mutation** | All database writes occur exclusively through the core API after schema validation and authentication |
+| 🐳 **Microservice isolation** | The AI service has no database credentials and no network path to the database |
+| ⚙️ **Structured AI output** | Model responses are parsed as strict JSON with fallback to deterministic templates on failure |
+| 🌐 **Multi-language support** | Full Hebrew and English support with language-aware responses |
+| 📬 **Telegram integration** | Optional notifications and weekly AI-generated summaries |
+| 🧪 **Comprehensive testing** | Automated tests for both services run on every push via GitHub Actions |
 
 ---
 
-## System Architecture
+## 🧱 System Architecture
 
 ```
                               Client
@@ -70,7 +70,7 @@ This architecture eliminates an entire class of risks associated with autonomous
 
 ---
 
-## AI Design Philosophy
+## 🧠 AI Design Philosophy
 
 ### Always Suggestions, Never Actions
 
@@ -99,16 +99,16 @@ By making the AI purely advisory, these risks are structurally eliminated. Even 
 
 ---
 
-## Security and Trust Boundaries
+## 🔐 Security and Trust Boundaries
 
 ### Authentication and Authorization
 
-- **JWT-based authentication** - All core-api endpoints (except health checks) require a valid token
-- **Password hashing** - User credentials are hashed with bcrypt before storage
-- **Token expiration** - JWTs have configurable expiration with secure defaults
-- **Ownership enforcement** - Users can only access and modify their own tasks
+- 🔐 **JWT-based authentication** - All core-api endpoints (except health checks) require a valid token
+- 🔐 **Password hashing** - User credentials are hashed with bcrypt before storage
+- 🔐 **Token expiration** - JWTs have configurable expiration with secure defaults
+- 🔐 **Ownership enforcement** - Users can only access and modify their own tasks
 
-### Service Isolation
+### 🧱 Service Isolation
 
 The chatbot-service is architecturally incapable of modifying data:
 
@@ -122,7 +122,7 @@ The chatbot-service is architecturally incapable of modifying data:
 
 Even if the chatbot-service were fully compromised, an attacker would gain access to a stateless container that can call OpenAI and respond to internal HTTP requests - nothing more.
 
-### Request Validation
+### ⚙️ Request Validation
 
 FastAPI with Pydantic provides automatic request validation:
 
@@ -130,40 +130,40 @@ FastAPI with Pydantic provides automatic request validation:
 - **Type coercion** - Strict typing prevents type confusion attacks
 - **Field constraints** - Minimum/maximum lengths, enum validation, and format checks are declarative
 
-### Threat Mitigations
+### 🛡️ Threat Mitigations
 
-**Prompt Injection**
+🛡️ **Prompt Injection**
 > AI cannot execute actions; output is parsed as data, not commands
 
-**Unauthorized Access**
+🛡️ **Unauthorized Access**
 > JWT authentication + ownership checks on every request
 
-**SQL/NoSQL Injection**
+🛡️ **SQL/NoSQL Injection**
 > Pydantic validation + MongoDB driver parameterization
 
-**Privilege Escalation**
+🛡️ **Privilege Escalation**
 > Chatbot-service has no privileges to escalate
 
-**Malformed AI Output**
+🛡️ **Malformed AI Output**
 > Strict JSON parsing with fallback to safe defaults
 
-**CSRF**
+🛡️ **CSRF**
 > Token-based auth (no cookies for API calls)
 
 ### Security by Architecture
 
 The security model does not depend on prompt engineering or hoping the AI "behaves." The guarantees are structural:
 
-- The AI service physically cannot reach the database
-- The AI service has no credentials to any system
-- All mutations require authenticated requests to a separate service
-- The mutation service validates every field before writing
+- 🧱 The AI service physically cannot reach the database
+- 🧱 The AI service has no credentials to any system
+- 🧱 All mutations require authenticated requests to a separate service
+- 🧱 The mutation service validates every field before writing
 
 ---
 
-## Backend and Infrastructure
+## ⚙️ Backend and Infrastructure
 
-### core-api (FastAPI)
+### 📦 core-api (FastAPI)
 
 **Responsibilities:**
 - User registration, login, and session management
@@ -180,7 +180,7 @@ The security model does not depend on prompt engineering or hoping the AI "behav
 - Dependency injection for clean separation of concerns
 - High performance with minimal overhead
 
-### chatbot-service (FastAPI)
+### 🧠 chatbot-service (FastAPI)
 
 **Responsibilities:**
 - Receiving messages from core-api (never from external clients)
@@ -190,7 +190,7 @@ The security model does not depend on prompt engineering or hoping the AI "behav
 
 The service is intentionally minimal (~150 lines of core logic). It maintains no state between requests.
 
-### Docker Configuration
+### 🐳 Docker Configuration
 
 ```yaml
 services:
@@ -209,7 +209,7 @@ Internal services communicate over a Docker bridge network. The host machine can
 
 ---
 
-## CI and Testing
+## 🔁 CI and Testing
 
 ### GitHub Actions Pipeline
 
@@ -217,12 +217,12 @@ Every push to `main` and every pull request triggers:
 
 | Step | Description |
 |------|-------------|
-| **test-core-api** | Runs pytest against all core-api tests |
-| **test-chatbot-service** | Runs pytest against all chatbot-service tests |
-| **build-docker** | Builds both Docker images (runs only if tests pass) |
-| **validate-compose** | Validates docker-compose.yml syntax |
+| 🧪 **test-core-api** | Runs pytest against all core-api tests |
+| 🧪 **test-chatbot-service** | Runs pytest against all chatbot-service tests |
+| 🐳 **build-docker** | Builds both Docker images (runs only if tests pass) |
+| ⚙️ **validate-compose** | Validates docker-compose.yml syntax |
 
-### What Is Tested
+### 🧪 What Is Tested
 
 - **Authentication flows** - Registration, login, token validation, expiration
 - **Task operations** - CRUD with ownership enforcement, field validation
@@ -240,11 +240,11 @@ AI-assisted features are notoriously difficult to test because model outputs var
 
 ---
 
-## Getting Started
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Docker and Docker Compose
+- 🐳 Docker and Docker Compose
 - Node.js 20+ (for local client development)
 - Python 3.11+ (for local backend development)
 
@@ -287,7 +287,7 @@ TELEGRAM_BOT_TOKEN=your-bot-token
 
 ---
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 TaskGenius/
@@ -320,7 +320,7 @@ TaskGenius/
 
 ---
 
-## Why This Architecture
+## 💡 Why This Architecture
 
 ### The Problem with Autonomous AI
 
@@ -351,6 +351,6 @@ For a task management application where incorrect actions could delete important
 
 ---
 
-## License
+## CREDITS
 
-MIT
+shaked arazi 
