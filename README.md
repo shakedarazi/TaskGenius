@@ -216,3 +216,36 @@ This project is intended as:
 TaskGenius shows that enforcing strict architectural constraints —  
 from APIs down to container boundaries —  
 can eliminate entire classes of failure and security risks.
+
+
+
+## 🚀 Getting Started
+# Prerequisites 
+🐳 Docker and Docker Compose 
+Node.js 20+ (for local client development) 
+Python 3.11+ (for local backend development) 
+
+
+# Quick Start with Docker  
+Clone the repository git clone https://github.com/your-username/TaskGenius.git
+ cd TaskGenius
+  # Start all services
+   docker compose up --build
+  # Verify health
+  curl http://localhost:8000/health
+
+
+  The React client must be built separately or run in development mode:
+  cd packages/client
+  npm install
+  npm run dev 
+     
+  Access the application at http://localhost:5173.
+  
+   # Environment Variables
+    Create a .env file in the project root for optional features:
+  # OpenAI integration (optional - falls back to templates if not set)
+      USE_LLM=true
+      OPENAI_API_KEY=sk-... 
+  # Telegram integration (optional)
+      TELEGRAM_BOT_TOKEN=your-bot-token
