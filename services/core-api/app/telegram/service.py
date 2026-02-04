@@ -1,6 +1,19 @@
-from typing import Optional
-import asyncio
+"""
+Telegram Service - Minimal command-based interface.
+
+Supported commands:
+- /help - Show available commands
+- /add <title> - Add a new task
+- /urgent - List high-priority tasks
+- /soon - List tasks due within 3 days
+
+This service is stateless and deterministic. It does NOT use AI/LLM.
+"""
+
+from typing import Optional, List
 import re
+import logging
+from datetime import datetime, timedelta, timezone
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from app.telegram.adapter import TelegramAdapter
@@ -9,12 +22,34 @@ from app.telegram.repository import (
     TelegramUpdateRepositoryInterface,
 )
 from app.auth.repository import MongoUserRepository
-from app.telegram.schemas import TelegramUpdate, TelegramMessage
-from app.chat.service import process_message
+from app.telegram.schemas import TelegramUpdate
 from app.tasks.repository import TaskRepositoryInterface
+from app.tasks.models import Task
+from app.tasks.enums import TaskStatus, TaskPriority
+
+logger = logging.getLogger(__name__)
+
+# Static help message
+HELP_MESSAGE = """🤖 TaskGenius Bot
+
+Commands:
+/add <title> — Add a new task
+/urgent — List high-priority tasks
+/soon — List tasks due within 3 days
+/help — Show this message
+
+Example: /add Buy groceries"""
+
+LINK_REQUIRED_MESSAGE = """Please link your Telegram account first.
+
+1. Log in to the TaskGenius web app
+2. Go to Settings → Telegram
+3. Generate a verification code
+4. Send the code here"""
 
 
 class TelegramService:
+    """Minimal, stateless Telegram command handler."""
 
     def __init__(
         self,
@@ -28,82 +63,171 @@ class TelegramService:
         self.user_repository = user_repository
         self.verification_repository = verification_repository
         self.update_repository = update_repository
-        # Keep in-memory fallback for backward compatibility
-        self._user_mappings: dict[int, str] = {}
 
     async def process_webhook_update(
         self,
         update: TelegramUpdate,
         task_repository: TaskRepositoryInterface,
     ) -> None:
-
-        # Idempotency check: skip if this update_id was already processed
+        """Process incoming Telegram update."""
+        
+        # Idempotency check: skip if already processed
         if self.update_repository:
             try:
                 if await self.update_repository.is_processed(update.update_id):
-                    return  # Already processed, skip silently
+                    return
             except Exception:
-                # If DB check fails, continue (don't break webhook)
-                pass
+                pass  # Don't break webhook on DB errors
 
         if not update.message or not update.message.text:
-            # Ignore non-text messages
-            return
+            return  # Ignore non-text messages
 
         telegram_user_id = update.message.from_user.id
-        message_text = update.message.text
+        message_text = update.message.text.strip()
         chat_id = update.message.chat.get("id")
         telegram_username = update.message.from_user.username
 
-        # Check if message is a verification code
+        # Check if message is a verification code (6-8 alphanumeric)
         if self._looks_like_verification_code(message_text):
             await self._handle_verification_code(
-                code=message_text.strip(),
+                code=message_text,
                 telegram_user_id=telegram_user_id,
                 telegram_chat_id=chat_id,
                 telegram_username=telegram_username,
             )
-            return  # Don't process as chat message
+            return
 
-        # Map Telegram user to application user
-        app_user_id = await self._get_or_create_user_mapping(telegram_user_id)
-
+        # Get linked app user
+        app_user_id = await self._get_user_id(telegram_user_id)
+        
         if not app_user_id:
-            # If we can't map the user, send a helpful message
             await self.telegram_adapter.send_message(
                 chat_id=chat_id,
-                text="Please register in the web application first to use Telegram integration. To link your account, generate a verification code in the web app and send it here.",
+                text=LINK_REQUIRED_MESSAGE,
             )
             return
 
-        # Mark update as processed (idempotency)
+        # Mark as processed (idempotency)
         if self.update_repository:
             try:
                 await self.update_repository.mark_processed(update.update_id, telegram_user_id)
             except Exception:
-                # If marking fails, continue (don't break webhook)
                 pass
 
-        # Route through existing chat flow
-        chat_response = await process_message(
+        # Route command
+        await self._handle_command(
+            text=message_text,
             user_id=app_user_id,
-            message=message_text,
-            selection=None,
+            chat_id=chat_id,
             task_repository=task_repository,
         )
 
-        # Send response back to Telegram
-        await self.telegram_adapter.send_message(
-            chat_id=chat_id,
-            text=chat_response.reply,
-        )
+    async def _handle_command(
+        self,
+        text: str,
+        user_id: str,
+        chat_id: int,
+        task_repository: TaskRepositoryInterface,
+    ) -> None:
+        """Route command to appropriate handler."""
+        
+        if text == "/help" or text == "/start":
+            await self.telegram_adapter.send_message(chat_id=chat_id, text=HELP_MESSAGE)
+        
+        elif text.startswith("/add "):
+            title = text[5:].strip()
+            if title:
+                reply = await self._cmd_add(title, user_id, task_repository)
+            else:
+                reply = "Usage: /add <task title>\n\nExample: /add Buy groceries"
+            await self.telegram_adapter.send_message(chat_id=chat_id, text=reply)
+        
+        elif text == "/add":
+            await self.telegram_adapter.send_message(
+                chat_id=chat_id,
+                text="Usage: /add <task title>\n\nExample: /add Buy groceries",
+            )
+        
+        elif text == "/urgent":
+            reply = await self._cmd_urgent(user_id, task_repository)
+            await self.telegram_adapter.send_message(chat_id=chat_id, text=reply)
+        
+        elif text == "/soon":
+            reply = await self._cmd_soon(user_id, task_repository)
+            await self.telegram_adapter.send_message(chat_id=chat_id, text=reply)
+        
+        else:
+            # Unknown command → show help
+            await self.telegram_adapter.send_message(chat_id=chat_id, text=HELP_MESSAGE)
+
+    async def _cmd_add(
+        self,
+        title: str,
+        user_id: str,
+        task_repository: TaskRepositoryInterface,
+    ) -> str:
+        """Create a new task with default priority."""
+        try:
+            task = Task.create(
+                owner_id=user_id,
+                title=title,
+                status=TaskStatus.OPEN,
+                priority=TaskPriority.MEDIUM,
+            )
+            await task_repository.create(task)
+            return (f"✅ Added: {task.title}\n"
+                    f"🌐 Manage task details → Web ")
+        except Exception as e:
+            logger.error(f"Failed to create task: {e}")
+            return "❌ Failed to add task. Please try again."
+
+    async def _cmd_soon(
+        self,
+        user_id: str,
+        task_repository: TaskRepositoryInterface,
+    ) -> str:
+        """List tasks with deadline within 3 days."""
+        try:
+            now = datetime.now(timezone.utc)
+            deadline_cutoff = now + timedelta(days=3)
+            
+            tasks = await task_repository.list_by_owner(
+                owner_id=user_id,
+                deadline_before=deadline_cutoff,
+                exclude_statuses=[TaskStatus.DONE, TaskStatus.CANCELED],
+            )
+            # Filter to only tasks that actually have a deadline
+            tasks_with_deadline = [t for t in tasks if t.deadline is not None]
+            return self._format_task_list(tasks_with_deadline, "📅 Due soon (within 3 days)")
+        except Exception as e:
+            logger.error(f"Failed to list soon tasks: {e}")
+            return "❌ Failed to fetch tasks. Please try again."
+
+    def _format_task_list(self, tasks: List[Task], title: str) -> str:
+        """Format task list for Telegram display."""
+        if not tasks:
+            return f"{title}\n\nNo tasks found."
+        
+        lines = [title, ""]
+        for i, task in enumerate(tasks[:10], 1):  # Limit to 10
+            priority_icon = "🔴" if task.priority == TaskPriority.URGENT else (
+                "🟠" if task.priority == TaskPriority.HIGH else ""
+            )
+            deadline_str = ""
+            if task.deadline:
+                deadline_str = f" (due {task.deadline.strftime('%b %d')})"
+            lines.append(f"{i}. {task.title}{priority_icon}{deadline_str}")
+        
+        if len(tasks) > 10:
+            lines.append(f"\n... and {len(tasks) - 10} more")
+        
+        return "\n".join(lines)
 
     def _looks_like_verification_code(self, text: str) -> bool:
+        """Check if text looks like a verification code (6-8 alphanumeric)."""
         if not text:
             return False
-        stripped = text.strip()
-        # Match 6-8 alphanumeric characters
-        return bool(re.match(r'^[A-Za-z0-9]{6,8}$', stripped))
+        return bool(re.match(r'^[A-Za-z0-9]{6,8}$', text))
 
     async def _handle_verification_code(
         self,
@@ -112,7 +236,7 @@ class TelegramService:
         telegram_chat_id: int,
         telegram_username: Optional[str],
     ) -> None:
-        """Handle verification code sent by user to link Telegram account."""
+        """Handle verification code for account linking."""
         if not self.verification_repository:
             await self.telegram_adapter.send_message(
                 chat_id=telegram_chat_id,
@@ -121,16 +245,14 @@ class TelegramService:
             return
 
         try:
-            # Find valid verification code
             verification = await self.verification_repository.get_valid_code(code)
             if not verification:
                 await self.telegram_adapter.send_message(
                     chat_id=telegram_chat_id,
-                    text="Invalid or expired verification code. Please generate a new code in the web application.",
+                    text="Invalid or expired code. Please generate a new one in the web app.",
                 )
                 return
 
-            # Create or update user-telegram link
             if not self.user_repository:
                 await self.telegram_adapter.send_message(
                     chat_id=telegram_chat_id,
@@ -138,57 +260,35 @@ class TelegramService:
                 )
                 return
 
-            # Update user's telegram field
             await self.user_repository.update_telegram_link(
                 user_id=verification.user_id,
                 telegram_user_id=telegram_user_id,
                 telegram_chat_id=telegram_chat_id,
                 telegram_username=telegram_username,
-                notifications_enabled=False,  # Default to disabled
+                notifications_enabled=False,
             )
 
-            # Mark code as used
             await self.verification_repository.mark_used(verification.id)
 
             await self.telegram_adapter.send_message(
                 chat_id=telegram_chat_id,
-                text="✅ Account linked successfully! You can now use Telegram to manage your tasks. Send /help to see available commands.",
+                text="✅ Account linked successfully!\n\nSend /help to see available commands.",
             )
         except Exception as e:
-            # Log error but send user-friendly message
+            logger.error(f"Verification error: {e}")
             await self.telegram_adapter.send_message(
                 chat_id=telegram_chat_id,
-                text="An error occurred while linking your account. Please try again or contact support.",
+                text="An error occurred. Please try again.",
             )
 
-    async def _get_or_create_user_mapping(self, telegram_user_id: int) -> Optional[str]:
-        # Try MongoDB repository first
-        if self.user_repository:
-            try:
-                user = await self.user_repository.get_by_telegram_user_id(telegram_user_id)
-                if user and user.telegram:
-                    return user.id
-            except Exception:
-                # If DB query fails, fall back to in-memory
-                pass
-        
-        # Fallback to in-memory mapping (backward compatibility)
-        return self._user_mappings.get(telegram_user_id)
-    
-    def set_user_mapping(self, telegram_user_id: int, app_user_id: str) -> None:
-        self._user_mappings[telegram_user_id] = app_user_id
-        # Also try to persist to MongoDB if repository is available
-        if self.user_repository:
-            try:
-                # Note: This doesn't have chat_id/username, but preserves backward compatibility
-                # In production, users should use verification flow instead
-                asyncio.create_task(
-                    self.user_repository.update_telegram_link(
-                        user_id=app_user_id,
-                        telegram_user_id=telegram_user_id,
-                        telegram_chat_id=0,  # Unknown, will be updated on next webhook
-                        telegram_username=None,
-                    )
-                )
-            except Exception:
-                pass  # Silent failure for backward compatibility
+    async def _get_user_id(self, telegram_user_id: int) -> Optional[str]:
+        """Get app user ID from Telegram user ID (DB lookup only)."""
+        if not self.user_repository:
+            return None
+        try:
+            user = await self.user_repository.get_by_telegram_user_id(telegram_user_id)
+            if user and user.telegram:
+                return user.id
+        except Exception as e:
+            logger.error(f"User lookup error: {e}")
+        return None
