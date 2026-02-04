@@ -65,11 +65,11 @@ class TestPriorityColors:
         result = telegram_service._format_task_list([task], "Test")
         assert "🔴" in result
 
-    def test_high_pink(self, telegram_service):
-        """HIGH priority should show 🩷 pink."""
+    def test_high_purple(self, telegram_service):
+        """HIGH priority should show 🟣 purple."""
         task = self._make_task(TaskPriority.HIGH)
         result = telegram_service._format_task_list([task], "Test")
-        assert "🩷" in result
+        assert "🟣" in result
 
     def test_medium_orange(self, telegram_service):
         """MEDIUM priority should show 🟠 orange."""
@@ -82,7 +82,7 @@ class TestPriorityColors:
         task = self._make_task(TaskPriority.LOW)
         result = telegram_service._format_task_list([task], "Test")
         assert "🔴" not in result
-        assert "🩷" not in result
+        assert "🟣" not in result
         assert "🟠" not in result
 
 
