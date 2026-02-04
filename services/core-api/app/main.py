@@ -28,6 +28,9 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup/shutdown events."""
@@ -40,8 +43,20 @@ async def lifespan(app: FastAPI):
     scheduler = WeeklySummaryScheduler(database.get_database())
     await scheduler.start()
     
+    # Startup: Telegram mode toggle
+    poller = None
+    if settings.TELEGRAM_MODE == "polling" and settings.TELEGRAM_BOT_TOKEN:
+        from app.telegram.poller import TelegramPoller
+        poller = TelegramPoller(database.get_database())
+        await poller.start()
+    elif settings.TELEGRAM_MODE == "webhook":
+        logger.info("Telegram webhook mode active (set webhook externally)")
+    
     yield
     
+    # Shutdown: Stop poller if running
+    if poller:
+        await poller.stop()
     # Shutdown: Stop scheduler
     await scheduler.stop()
     # Shutdown: Disconnect from MongoDB
