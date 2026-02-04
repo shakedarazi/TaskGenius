@@ -32,6 +32,10 @@ logger = logging.getLogger(__name__)
 # Static help message
 HELP_MESSAGE = """🤖 TaskGenius Bot
 
+Priorities:
+🔴 (urgent) 🟣 (high) 🟠 (medium)
+
+
 Commands:
 /add <title> — Add a new task
 /urgent — List high-priority tasks
@@ -181,6 +185,26 @@ class TelegramService:
             logger.error(f"Failed to create task: {e}")
             return "❌ Failed to add task. Please try again."
 
+    async def _cmd_urgent(
+        self,
+        user_id: str,
+        task_repository: TaskRepositoryInterface,
+    ) -> str:
+        """List tasks with high or urgent priority."""
+        try:
+            tasks = await task_repository.list_by_owner(
+                owner_id=user_id,
+                exclude_statuses=[TaskStatus.DONE, TaskStatus.CANCELED],
+            )
+            urgent_tasks = [
+                t for t in tasks
+                if t.priority in (TaskPriority.HIGH, TaskPriority.URGENT)
+            ]
+            return self._format_task_list(urgent_tasks, "⚡ Urgent tasks")
+        except Exception as e:
+            logger.error(f"Failed to list urgent tasks: {e}")
+            return "❌ Failed to fetch tasks. Please try again."
+
     async def _cmd_soon(
         self,
         user_id: str,
@@ -210,16 +234,13 @@ class TelegramService:
         
         lines = [title, ""]
         for i, task in enumerate(tasks[:10], 1):  # Limit to 10
-            priority_icon = "🔴" if task.priority == TaskPriority.URGENT else (
-                "🟠" if task.priority == TaskPriority.HIGH else ""
-            )
-            deadline_str = ""
-            if task.deadline:
-                deadline_str = f" (due {task.deadline.strftime('%b %d')})"
-            lines.append(f"{i}. {task.title}{priority_icon}{deadline_str}")
-        
-        if len(tasks) > 10:
-            lines.append(f"\n... and {len(tasks) - 10} more")
+            # Priority colors: Urgent=Red, High=purple, Medium=Orange
+            priority_icon = {
+                TaskPriority.URGENT: "🔴",
+                TaskPriority.HIGH: "🟣",
+                TaskPriority.MEDIUM: "🟠",
+            }.get(task.priority, "")
+            lines.append(f"{i}. {task.title}{priority_icon}")
         
         return "\n".join(lines)
 

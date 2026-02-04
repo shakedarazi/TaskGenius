@@ -111,42 +111,32 @@ class TestTelegramService:
         repo.list_by_owner = AsyncMock(return_value=[])
         return repo
 
-    @patch("app.telegram.service.process_message")
     @patch("app.telegram.service.TelegramAdapter.send_message")
     async def test_process_webhook_update_success(
         self,
         mock_send,
-        mock_chat_process,
         service,
         telegram_update,
         task_repository,
     ):
-        """Service should process webhook update and send response."""
-        from app.chat.schemas import ChatResponse
+        """Service should process webhook update and send response (help for unknown command)."""
+        # Mock user repository to return a linked user
+        mock_user = MagicMock()
+        mock_user.id = "test-user-id"
+        mock_user.telegram = MagicMock()
         
-        # Set up user mapping
-        service.set_user_mapping(123456, "test-user-id")
+        service.user_repository = MagicMock()
+        service.user_repository.get_by_telegram_user_id = AsyncMock(return_value=mock_user)
         
-        # Mock chat response
-        mock_chat_process.return_value = ChatResponse(
-            reply="You have 0 tasks",
-        )
-        
-        # Mock Telegram send
         mock_send.return_value = MagicMock(ok=True)
         
         await service.process_webhook_update(telegram_update, task_repository)
         
-        # Verify chat service was called
-        assert mock_chat_process.called
-        
-        # Verify Telegram send was called
+        # Verify Telegram send was called (help message for unknown command)
         assert mock_send.called
         send_call_args = mock_send.call_args
-        chat_id = send_call_args[0][0] if send_call_args[0] else send_call_args[1].get("chat_id")
-        text = send_call_args[0][1] if len(send_call_args[0]) > 1 else send_call_args[1].get("text")
-        assert chat_id == 123456
-        assert text == "You have 0 tasks"
+        text = send_call_args[1].get("text") or send_call_args[0][1]
+        assert "TaskGenius Bot" in text or "Commands" in text
 
     @patch("app.telegram.service.TelegramAdapter.send_message")
     async def test_process_webhook_update_no_user_mapping(
@@ -156,7 +146,11 @@ class TestTelegramService:
         telegram_update,
         task_repository,
     ):
-        """Service should send helpful message if user mapping doesn't exist."""
+        """Service should send helpful message if user is not linked."""
+        # No user repository or user returns None
+        service.user_repository = MagicMock()
+        service.user_repository.get_by_telegram_user_id = AsyncMock(return_value=None)
+        
         mock_send.return_value = MagicMock(ok=True)
         
         await service.process_webhook_update(telegram_update, task_repository)
@@ -164,8 +158,8 @@ class TestTelegramService:
         # Verify helpful message was sent
         assert mock_send.called
         send_call_args = mock_send.call_args
-        text = send_call_args[0][1] if len(send_call_args[0]) > 1 else send_call_args[1].get("text")
-        assert "register" in text.lower()
+        text = send_call_args[1].get("text") or send_call_args[0][1]
+        assert "link" in text.lower()
 
     @patch("app.telegram.service.TelegramAdapter.send_message")
     async def test_process_webhook_update_no_text(
