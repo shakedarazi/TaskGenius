@@ -240,7 +240,10 @@ class TelegramService:
                 TaskPriority.HIGH: "🟣",
                 TaskPriority.MEDIUM: "🟠",
             }.get(task.priority, "")
-            lines.append(f"{i}. {task.title}{priority_icon}")
+            deadline_str = ""
+            if task.deadline:
+                deadline_str = f" (due {task.deadline.strftime('%b %d')})"
+            lines.append(f"{i}. {task.title}{priority_icon}{deadline_str}")
         
         return "\n".join(lines)
 
