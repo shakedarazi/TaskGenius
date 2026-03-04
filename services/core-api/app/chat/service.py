@@ -6,10 +6,10 @@ import logging
 import httpx
 from typing import Dict, List, Optional, Any
 
-from app.config import settings
+from app.core.config import settings
 from app.tasks.repository import TaskRepositoryInterface
 from app.tasks.models import Task
-from app.tasks.enums import TaskStatus, TaskPriority, TaskCategory, EstimateBucket
+from app.core.enums import TaskStatus, TaskPriority, TaskCategory, EstimateBucket
 from app.chat.schemas import ChatResponse, TaskSuggestion
 
 logger = logging.getLogger(__name__)

@@ -7,7 +7,7 @@ Only core-api may access MongoDB per architecture constraints.
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
-from app.config import settings
+from app.core.config import settings
 
 
 class Database:

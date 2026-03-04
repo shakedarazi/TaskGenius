@@ -4,7 +4,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.database import get_database
+from app.core.database import get_database
 from app.auth.models import User
 from app.auth.service import AuthService
 from app.auth.repository import MongoUserRepository

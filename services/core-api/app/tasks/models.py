@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import uuid
 
-from app.tasks.enums import (
+from app.core.enums import (
     TaskStatus,
     TaskPriority,
     TaskCategory,

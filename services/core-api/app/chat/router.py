@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.auth.dependencies import CurrentUser
 from app.tasks.repository import TaskRepositoryInterface
-from app.tasks.router import get_task_repository
+from app.tasks.dependencies import get_task_repository
 from app.chat.schemas import ChatRequest, ChatResponse
 from app.chat.service import process_message
 

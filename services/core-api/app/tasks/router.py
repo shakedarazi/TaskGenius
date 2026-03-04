@@ -2,12 +2,9 @@ from datetime import datetime
 from typing import Optional, Annotated
 
 from fastapi import APIRouter, HTTPException, status, Depends, Query
-from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.database import get_database
 from app.auth.dependencies import CurrentUser
 from app.tasks.service import TaskService
-from app.tasks.repository import TaskRepository, TaskRepositoryInterface
 from app.tasks.schemas import (
     TaskCreateRequest,
     TaskUpdateRequest,
@@ -15,22 +12,11 @@ from app.tasks.schemas import (
     TaskListResponse,
     TaskDeleteResponse,
 )
-from app.tasks.enums import TaskStatus
+from app.tasks.dependencies import get_task_repository, get_task_service
+from app.core.enums import TaskStatus
 
 
 router = APIRouter(prefix="/tasks", tags=["Tasks"])
-
-
-async def get_task_repository(
-    db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
-) -> TaskRepositoryInterface:
-    return TaskRepository(db)
-
-
-async def get_task_service(
-    repository: Annotated[TaskRepositoryInterface, Depends(get_task_repository)]
-) -> TaskService:
-    return TaskService(repository)
 
 
 @router.post(

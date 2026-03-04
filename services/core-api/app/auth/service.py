@@ -4,7 +4,7 @@ from typing import Optional
 import bcrypt
 from jose import jwt, JWTError
 
-from app.config import settings
+from app.core.config import settings
 from app.auth.models import User
 from app.auth.repository import UserRepositoryInterface
 

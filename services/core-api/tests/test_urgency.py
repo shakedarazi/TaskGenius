@@ -8,7 +8,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 
 from app.tasks.models import Task
-from app.tasks.enums import TaskStatus, TaskPriority, UrgencyLevel
+from app.core.enums import TaskStatus, TaskPriority, UrgencyLevel
 from app.tasks.service import TaskService
 
 

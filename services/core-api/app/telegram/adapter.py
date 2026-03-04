@@ -2,7 +2,7 @@ import logging
 import httpx
 from typing import Optional, List
 
-from app.config import settings
+from app.core.config import settings
 from app.telegram.schemas import TelegramSendMessageRequest, TelegramSendMessageResponse
 
 logger = logging.getLogger(__name__)

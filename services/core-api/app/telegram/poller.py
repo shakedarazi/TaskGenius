@@ -10,12 +10,12 @@ import asyncio
 import logging
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.config import settings
+from app.core.config import settings
 from app.telegram.adapter import TelegramAdapter
 from app.telegram.schemas import TelegramUpdate
 # REUSE EXISTING FACTORIES - guarantees identical behavior with webhook
-from app.telegram.router import get_telegram_service
-from app.tasks.router import get_task_repository
+from app.telegram.dependencies import get_telegram_service
+from app.tasks.dependencies import get_task_repository
 
 logger = logging.getLogger(__name__)
 

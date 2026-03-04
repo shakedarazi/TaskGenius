@@ -3,7 +3,7 @@ from typing import Optional, List
 
 from pydantic import BaseModel, Field
 
-from app.tasks.enums import (
+from app.core.enums import (
     TaskStatus,
     TaskPriority,
     TaskCategory,

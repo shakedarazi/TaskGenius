@@ -10,15 +10,15 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.config import settings
-from app.database import database
+from app.core.config import settings
+from app.core.database import database
 from app.auth import auth_router
 from app.tasks import tasks_router
 from app.insights import insights_router
 from app.chat import chat_router
 from app.telegram import telegram_router
 from app.telegram.scheduler import WeeklySummaryScheduler
-from app.security import validate_security_config
+from app.core.security import validate_security_config
 
 import logging
 

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional, List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from app.tasks.models import Task
-from app.tasks.enums import TaskStatus
+from app.core.enums import TaskStatus
 
 class TaskRepositoryInterface(ABC):
 

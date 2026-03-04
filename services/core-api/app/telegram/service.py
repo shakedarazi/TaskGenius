@@ -25,7 +25,7 @@ from app.auth.repository import MongoUserRepository
 from app.telegram.schemas import TelegramUpdate
 from app.tasks.repository import TaskRepositoryInterface
 from app.tasks.models import Task
-from app.tasks.enums import TaskStatus, TaskPriority
+from app.core.enums import TaskStatus, TaskPriority
 
 logger = logging.getLogger(__name__)
 

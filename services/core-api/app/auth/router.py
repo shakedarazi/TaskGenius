@@ -1,9 +1,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.database import get_database
 from app.auth.schemas import (
     UserRegisterRequest,
     UserLoginRequest,
@@ -12,16 +10,7 @@ from app.auth.schemas import (
     MessageResponse,
 )
 from app.auth.service import AuthService
-from app.auth.repository import MongoUserRepository
-from app.auth.dependencies import CurrentUser
-
-
-def get_auth_service(
-    db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
-) -> AuthService:
-    """Dependency to get AuthService instance with MongoDB repository."""
-    user_repo = MongoUserRepository(db)
-    return AuthService(user_repo)
+from app.auth.dependencies import CurrentUser, get_auth_service
 
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])

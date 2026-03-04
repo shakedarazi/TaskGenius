@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from app.tasks.enums import TaskStatus, TaskPriority, TaskCategory, UrgencyLevel
+from app.core.enums import TaskStatus, TaskPriority, TaskCategory, UrgencyLevel
 
 
 class TaskSummary(BaseModel):

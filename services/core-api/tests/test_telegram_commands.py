@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from app.telegram.service import TelegramService
 from app.tasks.models import Task
-from app.tasks.enums import TaskStatus, TaskPriority
+from app.core.enums import TaskStatus, TaskPriority
 
 
 @pytest.fixture

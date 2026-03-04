@@ -1,5 +1,5 @@
 """
-TASKGENIUS Core API - Task Enums
+TASKGENIUS Core API - Shared Enums
 
 Enums for task-related fields, derived from shared/contracts/enums.json.
 These enums are immutable contracts and must not be modified.

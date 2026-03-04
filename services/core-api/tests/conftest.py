@@ -17,11 +17,10 @@ from unittest.mock import MagicMock
 from app.main import app
 from app.auth.repository import UserRepositoryInterface, User
 from app.auth.service import AuthService
-from app.auth.router import get_auth_service as get_auth_service_router
-from app.auth.dependencies import get_auth_service as get_auth_service_deps, get_current_user, CurrentUser, bearer_scheme
+from app.auth.dependencies import get_auth_service, get_current_user, CurrentUser, bearer_scheme
 from app.tasks.repository import InMemoryTaskRepository
-from app.tasks.router import get_task_repository
-from app.database import get_database
+from app.tasks.dependencies import get_task_repository
+from app.core.database import get_database
 
 
 # Global in-memory repositories for tests
@@ -73,7 +72,7 @@ _test_auth_service = AuthService(_test_user_repository)
 async def override_get_auth_service(db=None):
     """Override dependency to use in-memory user repository.
     
-    Signature must match get_auth_service from app.auth.router.
+    Signature must match get_auth_service from app.auth.dependencies.
     Note: db parameter is ignored - we use in-memory repo for tests.
     """
     # Return test auth_service with in-memory repository
@@ -168,9 +167,8 @@ def client(task_repository):
     user_repository.clear()
     # Override the repository dependency
     app.dependency_overrides[get_task_repository] = override_get_task_repository
-    # Override auth service dependency (both locations)
-    app.dependency_overrides[get_auth_service_router] = override_get_auth_service
-    app.dependency_overrides[get_auth_service_deps] = override_get_auth_service
+    # Override auth service dependency
+    app.dependency_overrides[get_auth_service] = override_get_auth_service
     # Override get_current_user to use test auth_service
     # IMPORTANT: Must override the exact function object used by the route
     # This override bypasses dependency resolution by extracting token directly from request

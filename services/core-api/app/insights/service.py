@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from app.tasks.models import Task
-from app.tasks.enums import TaskStatus, TaskPriority, UrgencyLevel
+from app.core.enums import TaskStatus, TaskPriority, UrgencyLevel
 from app.tasks.service import TaskService
 from app.insights.schemas import (
     WeeklySummary,

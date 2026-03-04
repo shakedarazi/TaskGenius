@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.config import settings
+from app.core.config import settings
 from app.telegram.weekly_service import TelegramWeeklySummaryService
 from app.auth.repository import MongoUserRepository
 from app.telegram.weekly_repository import MongoTelegramWeeklySummaryRepository

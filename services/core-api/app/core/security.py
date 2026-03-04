@@ -5,7 +5,7 @@ Security checks and validations for Phase 6 hardening.
 """
 
 import warnings
-from app.config import settings
+from app.core.config import settings
 
 
 def validate_security_config() -> None:

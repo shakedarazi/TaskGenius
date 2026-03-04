@@ -3,7 +3,7 @@ from typing import Optional, List, Callable
 
 from app.tasks.models import Task
 from app.tasks.repository import TaskRepositoryInterface
-from app.tasks.enums import TaskStatus, UrgencyLevel
+from app.core.enums import TaskStatus, UrgencyLevel
 from app.tasks.schemas import TaskCreateRequest, TaskUpdateRequest, TaskResponse
 
 

@@ -2,15 +2,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from app.database import get_database
+from app.core.database import get_database
 from app.tasks.repository import TaskRepositoryInterface
-from app.tasks.router import get_task_repository
+from app.tasks.dependencies import get_task_repository
 from app.auth.dependencies import CurrentUser
-from app.auth.repository import MongoUserRepository
-from app.telegram.repository import (
-    MongoTelegramVerificationRepository,
-    MongoTelegramUpdateRepository,
-)
 from app.telegram.schemas import (
     TelegramUpdate,
     TelegramLinkStartResponse,
@@ -21,28 +16,15 @@ from app.telegram.schemas import (
 )
 from app.telegram.service import TelegramService
 from app.telegram.weekly_service import TelegramWeeklySummaryService
-from app.telegram.weekly_repository import MongoTelegramWeeklySummaryRepository
-from app.telegram.adapter import TelegramAdapter
-from app.tasks.repository import TaskRepository
-from app.insights.service import InsightsService
+from app.telegram.dependencies import (
+    get_telegram_service,
+    get_weekly_summary_service,
+    get_user_repo,
+    get_verification_repo,
+)
 
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
-
-
-async def get_telegram_service(
-    db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
-) -> TelegramService:
-    """Dependency to get Telegram service instance with MongoDB repositories."""
-    user_repo = MongoUserRepository(db)
-    verification_repo = MongoTelegramVerificationRepository(db)
-    update_repo = MongoTelegramUpdateRepository(db)
-    return TelegramService(
-        db=db,
-        user_repository=user_repo,
-        verification_repository=verification_repo,
-        update_repository=update_repo,
-    )
 
 
 @router.post("/webhook")
@@ -68,14 +50,6 @@ async def telegram_webhook_info() -> dict:
     }
 
 
-def _get_user_repo(db: AsyncIOMotorDatabase) -> MongoUserRepository:
-    return MongoUserRepository(db)
-
-
-def _get_verification_repo(db: AsyncIOMotorDatabase) -> MongoTelegramVerificationRepository:
-    return MongoTelegramVerificationRepository(db)
-
-
 @router.post("/link/start", response_model=TelegramLinkStartResponse)
 async def start_telegram_link(
     current_user: CurrentUser,
@@ -85,7 +59,7 @@ async def start_telegram_link(
     import string
     from datetime import datetime, timedelta, timezone
     
-    verification_repo = _get_verification_repo(db)
+    verification_repo = get_verification_repo(db)
     
     # Generate 6-character alphanumeric code
     alphabet = string.ascii_letters + string.digits
@@ -130,7 +104,7 @@ async def unlink_telegram(
     current_user: CurrentUser,
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)],
 ) -> TelegramUnlinkResponse:
-    user_repo = _get_user_repo(db)
+    user_repo = get_user_repo(db)
     await user_repo.remove_telegram_link(current_user.id)
     return TelegramUnlinkResponse(unlinked=True)
 
@@ -141,7 +115,7 @@ async def toggle_telegram_notifications(
     current_user: CurrentUser,
     db: Annotated[AsyncIOMotorDatabase, Depends(get_database)],
 ) -> TelegramStatusResponse:
-    user_repo = _get_user_repo(db)
+    user_repo = get_user_repo(db)
     
     # Check if user has Telegram link before trying to update
     if not current_user.telegram:
@@ -163,24 +137,6 @@ async def toggle_telegram_notifications(
         linked=True,
         telegram_username=user.telegram.telegram_username,
         notifications_enabled=user.telegram.notifications_enabled,
-    )
-
-
-async def get_weekly_summary_service(
-    db: Annotated[AsyncIOMotorDatabase, Depends(get_database)]
-) -> TelegramWeeklySummaryService:
-    user_repo = MongoUserRepository(db)
-    summary_repo = MongoTelegramWeeklySummaryRepository(db)
-    task_repo = TaskRepository(db)
-    insights_service = InsightsService()
-    telegram_adapter = TelegramAdapter()
-    return TelegramWeeklySummaryService(
-        db=db,
-        user_repo=user_repo,
-        summary_repo=summary_repo,
-        task_repo=task_repo,
-        insights_service=insights_service,
-        telegram_adapter=telegram_adapter,
     )
 
 
