@@ -3,11 +3,11 @@ from pydantic import BaseModel, Field
 
 
 class TaskSuggestion(BaseModel):
-    """Single task suggestion matching Task schema."""
+    """Single task suggestion matching Task schema. Aligns with core-api and shared contracts."""
     title: str
-    priority: str = "medium"  # low|medium|high|urgent
-    category: Optional[str] = None  # work|study|personal|health|finance|errands|other
-    estimate_bucket: Optional[str] = None  # lt_15|15_30|30_60|60_120|gt_120
+    priority: str = "medium"  # low|medium|high|urgent (TaskPriority)
+    category: Optional[str] = None  # work|study|personal|health|finance|errands|other (TaskCategory)
+    estimate_bucket: Optional[str] = None  # lt_15|15_30|30_60|60_120|gt_120 (EstimateBucket)
 
 
 class SuggestRequest(BaseModel):

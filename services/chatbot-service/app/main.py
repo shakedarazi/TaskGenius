@@ -1,7 +1,7 @@
 import logging
 from fastapi import FastAPI
 
-from app.config import settings
+from app.core.config import settings
 
 # Configure logging
 logging.basicConfig(
@@ -41,5 +41,5 @@ async def root() -> dict:
     }
 
 
-from app.router import router as interpret_router
-app.include_router(interpret_router)
+from app.suggestions import suggestions_router
+app.include_router(suggestions_router)

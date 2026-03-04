@@ -3,8 +3,8 @@ Chatbot Service - Suggestion Tests
 Minimal tests for suggestion-only architecture.
 """
 import pytest
-from app.schemas import SuggestRequest, SuggestResponse, TaskSuggestion
-from app.service import generate_suggestions, fallback_response, build_prompt, parse_response
+from app.suggestions.schemas import SuggestRequest, SuggestResponse, TaskSuggestion
+from app.suggestions.service import generate_suggestions, fallback_response, build_prompt, parse_response
 
 
 class TestSuggestionService:
@@ -34,7 +34,7 @@ class TestSuggestionService:
 
     async def test_generate_suggestions_without_llm(self, monkeypatch):
         """Should use fallback when LLM is disabled."""
-        monkeypatch.setattr("app.service.settings.USE_LLM", False)
+        monkeypatch.setattr("app.core.config.settings.USE_LLM", False)
         
         response = await generate_suggestions(
             message="test message",

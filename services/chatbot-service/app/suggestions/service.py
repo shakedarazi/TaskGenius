@@ -1,23 +1,19 @@
+"""
+TASKGENIUS Chatbot Service - Suggestions Service
+
+Business logic for prompt building, response parsing, and fallback.
+Does NOT import OpenAI SDK; all LLM calls go through repository.
+"""
+
 import json
 import logging
 from typing import List, Dict, Any, Optional
 
-from openai import AsyncOpenAI
-
-from app.config import settings
-from app.schemas import SuggestResponse, TaskSuggestion
+from app.core.config import settings
+from app.suggestions.schemas import SuggestResponse, TaskSuggestion
+from app.suggestions.repository import LLMRepositoryInterface
 
 logger = logging.getLogger(__name__)
-
-# OpenAI client (initialized once)
-_client: Optional[AsyncOpenAI] = None
-
-
-def get_client() -> Optional[AsyncOpenAI]:
-    global _client
-    if _client is None and settings.USE_LLM and settings.OPENAI_API_KEY:
-        _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-    return _client
 
 
 def build_prompt(message: str, tasks: Optional[List[Dict[str, Any]]]) -> str:
@@ -94,30 +90,28 @@ def fallback_response(message: str) -> SuggestResponse:
     )
 
 
-async def generate_suggestions(
-    message: str,
-    user_id: str,
-    tasks: Optional[List[Dict[str, Any]]] = None
-) -> SuggestResponse:
-    """Generate task suggestions from user message."""
-    client = get_client()
-    
-    if not client:
-        logger.debug("No OpenAI client, using fallback")
-        return fallback_response(message)
-    
-    prompt = build_prompt(message, tasks)
-    
-    try:
-        response = await client.chat.completions.create(
+class SuggestionsService:
+    """Service for generating task suggestions from user messages."""
+
+    def __init__(self, repository: LLMRepositoryInterface):
+        self.repository = repository
+
+    async def generate_suggestions(
+        self,
+        message: str,
+        user_id: str,
+        tasks: Optional[List[Dict[str, Any]]] = None,
+    ) -> SuggestResponse:
+        """Generate task suggestions from user message."""
+        content = await self.repository.generate_completion(
+            prompt=build_prompt(message, tasks),
             model=settings.MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
             timeout=settings.LLM_TIMEOUT,
         )
         
-        content = response.choices[0].message.content
         if not content:
+            logger.debug("No LLM completion, using fallback")
             return fallback_response(message)
         
         data = parse_response(content)
@@ -142,9 +136,16 @@ async def generate_suggestions(
         
         return SuggestResponse(
             summary=data.get("summary", ""),
-            suggestions=suggestions
+            suggestions=suggestions,
         )
-        
-    except Exception as e:
-        logger.warning(f"AI request failed: {e}")
-        return fallback_response(message)
+
+
+async def generate_suggestions(
+    message: str,
+    user_id: str,
+    tasks: Optional[List[Dict[str, Any]]] = None,
+) -> SuggestResponse:
+    """Standalone entry point for backward compatibility with tests."""
+    from app.suggestions.repository import get_llm_repository
+    service = SuggestionsService(get_llm_repository())
+    return await service.generate_suggestions(message, user_id, tasks)
